@@ -32,14 +32,59 @@ def term_indexer():
     return term_index       # term, index の単語辞書
 
 # Step.2 フォーマット化
-# 高次元データの場合、スパースで大規模なものになりやすく、この場合、Pythonなどのラッパー経由だと正しく処理できないことがあります。そのため、libsvm形式と呼ばれる形式に変換して扱います。
-# 直接、バイナリに投入した方が早いので、以下の形式に変換します。
+# 入力： <term1> <index1><term2> <index2><term3> <index3>
+# 出力： libsvmフォーマット
+# <label> <index1>:<value1> <index2>:<value2> ...
 # 1 1:0.12 2:0.4 3:0.1 ...
 # 0 2:0.59 4:0.1 5:0.01 ...
+def svm_indexer():
+    term_id = {}
+    # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
+    with open("Data/term_index_test1019.txt", 'r', encoding="utf-8") as term_index_file:
+        term_index = term_index_file.read()
+        for i in term_index.split('\n'):
+            term_index_pair = i.split(" ")
+            if len(term_index_pair) < 2: continue
+            term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
+
+    # <star> __ SEP __ <review sentence> ->
+    with open("Data/rakuten_reviews_wakati_test.txt", 'r', encoding="utf-8") as review_wakati_file:
+        for line in review_wakati_file.readlines():
+            if line is None: continue
+            ents = line.split(" __ SEP __ ")
+            if len(ents) < 2: continue
+            star = float(ents[0].replace("\ufeff", "").replace(" ", ""))
+            terms = ents[1]
+
+            # レビュー文中の単語の出現頻度　{<term1>:<freq1>, <term2>:<freq2>, ...}
+            term_freq = {}
+            for term in terms.split(" "):
+                if term is '\n': continue
+                if not term in term_freq.keys(): term_freq[term] = 0.0
+                else: term_freq[term] += 1.0
+
+            # 単語のインデックスと頻度(log重み)　
+            id_weight = {}
+            for term in term_freq:
+                id_weight[term_id[term]] = round(math.log(term_freq[term] + 1.0), 3)
+            # {<id1>:<log_freq1>, <id2>:<log_freq2>, ...} idでソート
+            id_weight = dict(sorted(id_weight.items()))
+
+
+            # 極性、単語インデックス、頻度重みをlibsvmフォーマットに
+            if star > 4.0: ans = str(1)
+            elif star <= 3.0: ans = str(0)
+            else : ans = str(-1)
+            for id, weight in id_weight.items():
+                if id is not None:
+                    ans += " {0}:{1}".format(str(id), str(weight))
+                    # <class> <key1>:<value1> <key2>:<value2> ...
+            print(ans)
 
 
 if __name__ == '__main__':
     dict_term_id = term_indexer()
+    svm_indexer()
 
 
 sys.exit()

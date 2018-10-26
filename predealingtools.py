@@ -86,6 +86,42 @@ def svm_indexer(review_path, term_index_path):
     with open("Data/svm_fmt_test1026.txt", 'w', encoding="utf-8") as out_file:
         out_file.write(output)
 
+# Step.3 機械学習
+# pythonバインディングができず保留
+
+# Step.4 学習結果と単語idを衝突させる
+#　重みとidを対応づける
+def weight_checker(term_index_path, model_path):
+    term_id = {}
+    # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
+    with open(term_index_path, 'r', encoding="utf-8") as term_index_file:
+        term_index = term_index_file.read()
+        for i in term_index.split('\n'):
+            term_index_pair = i.split(" ")
+            if len(term_index_pair) < 2: continue
+            term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
+
+    weight_id = {}
+    i = 1
+    # {<weight1>:<index1>, <weight2>:<index2>, ...}
+    with open(model_path, 'r', encoding="utf-8") as model_file:
+        model = model_file.read().split('\n')
+        for line in model[6:]:
+            weight_id.setdefault(line, i)
+            i += 1
+        weight_id = dict(sorted(weight_id.items()))
+
+    dictionary_str = ""
+    for weight, w_id in weight_id.items():
+        for term, t_id in term_id.items():
+            if w_id is t_id: dictionary_str += "{0} {1}\n".format(term, weight)
+
+    with open("Data/dictionary_test.txt", 'w', encoding="utf-8") as out_file:
+        out_file.write(dictionary_str)
+
+
+
+
 
 if __name__ == '__main__':
     # レビュー文と単語idデータのパス
@@ -97,6 +133,8 @@ if __name__ == '__main__':
     term_indexer(review_path, term_index_path)
 
     svm_indexer(review_path, term_index_path)
+
+    weight_checker(term_index_path, model_path)
 
 
 sys.exit()

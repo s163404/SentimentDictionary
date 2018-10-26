@@ -4,12 +4,12 @@ import sys
 import math
 
 # Step.1 単語のindex付け
-#フォーマットは <星の数> _SEP_ <分かち書き済レビュー文>
-def term_indexer():
+# フォーマットは <星の数> _SEP_ <分かち書き済レビュー文>
+def term_indexer(review_path, term_index_path):
     term_index = {}
     term_index_str = ""
     index_num = 1
-    with open("Data/rakuten_reviews_wakati_test.txt", 'r', encoding="utf-8") as file:
+    with open(review_path, 'r', encoding="utf-8") as file:
         for l in file.readlines():
             if l is None: continue
             ents = l.split(" __ SEP __ ") #ents[0] 星の数、 ents[1] レビュー文
@@ -25,11 +25,10 @@ def term_indexer():
                 index_num += 1
                 # <term1> <index1><term2> <index2><term3> <index3>...
 
-    with open("Data/term_index_test1019.txt", 'w', encoding="utf-8") as out_file:
+    with open(term_index_path, 'w', encoding="utf-8") as out_file:
         out_file.write(term_index_str)
-
     print("単語のid付け完了")
-    return term_index       # term, index の単語辞書
+
 
 # Step.2 フォーマット化
 # 入力： <term1> <index1><term2> <index2><term3> <index3>
@@ -37,10 +36,10 @@ def term_indexer():
 # <label> <index1>:<value1> <index2>:<value2> ...
 # 1 1:0.12 2:0.4 3:0.1 ...
 # 0 2:0.59 4:0.1 5:0.01 ...
-def svm_indexer():
+def svm_indexer(review_path, term_index_path):
     term_id = {}
     # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
-    with open("Data/term_index_test1019.txt", 'r', encoding="utf-8") as term_index_file:
+    with open(term_index_path, 'r', encoding="utf-8") as term_index_file:
         term_index = term_index_file.read()
         for i in term_index.split('\n'):
             term_index_pair = i.split(" ")
@@ -48,7 +47,8 @@ def svm_indexer():
             term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
 
     # <star> __ SEP __ <review sentence> ->
-    with open("Data/rakuten_reviews_wakati_test.txt", 'r', encoding="utf-8") as review_wakati_file:
+    print("レビュー文中の単語の出現頻度と単語idを照合し、libsvm形式になおす")
+    with open(review_path, 'r', encoding="utf-8") as review_wakati_file:
         for line in review_wakati_file.readlines():
             if line is None: continue
             ents = line.split(" __ SEP __ ")
@@ -83,8 +83,15 @@ def svm_indexer():
 
 
 if __name__ == '__main__':
-    dict_term_id = term_indexer()
-    svm_indexer()
+    # レビュー文と単語idデータのパス
+    review_path = "Data/rakuten_reviews_wakati_test.txt"    # レビュー文
+    term_index_path = "Data/term_index_test1026.txt"        # 単語―id データ
+    model_path = "Data/svm_fmt_test1026.txt.model"          # 機械学習モデル
+
+
+    term_indexer(review_path, term_index_path)
+
+    svm_indexer(review_path, term_index_path)
 
 
 sys.exit()

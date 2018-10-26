@@ -49,6 +49,7 @@ def svm_indexer(review_path, term_index_path):
     # <star> __ SEP __ <review sentence> ->
     print("レビュー文中の単語の出現頻度と単語idを照合し、libsvm形式になおす")
     with open(review_path, 'r', encoding="utf-8") as review_wakati_file:
+        output = ""
         for line in review_wakati_file.readlines():
             if line is None: continue
             ents = line.split(" __ SEP __ ")
@@ -64,22 +65,26 @@ def svm_indexer(review_path, term_index_path):
                 else: term_freq[term] += 1.0
 
             # 単語のインデックスと頻度(log重み)　
-            id_weight = {}
+            id_freq = {}
             for term in term_freq:
-                id_weight[term_id[term]] = round(math.log(term_freq[term] + 1.0), 3)
+                id_freq[term_id[term]] = round(math.log(term_freq[term] + 1.0), 3)
             # {<id1>:<log_freq1>, <id2>:<log_freq2>, ...} idでソート
-            id_weight = dict(sorted(id_weight.items()))
+            id_freq = dict(sorted(id_freq.items()))
 
 
-            # 極性、単語インデックス、頻度重みをlibsvmフォーマットに
+            # 星の数ラベル、単語インデックス、頻度重みをlibsvmフォーマットに
             if star > 4.0: ans = str(1)
-            elif star <= 3.0: ans = str(0)
-            else : ans = str(-1)
-            for id, weight in id_weight.items():
+            else : ans = str(0)
+            #else : ans = str(-1)
+            for id, freq in id_freq.items():
                 if id is not None:
-                    ans += " {0}:{1}".format(str(id), str(weight))
-                    # <class> <key1>:<value1> <key2>:<value2> ...
+                    ans += " {0}:{1}".format(str(id), str(freq))
+                    # ans: <class> <key1>:<value1> <key2>:<value2> ...
+            output += ans + '\n'
             print(ans)
+
+    with open("Data/svm_fmt_test1026.txt", 'w', encoding="utf-8") as out_file:
+        out_file.write(output)
 
 
 if __name__ == '__main__':

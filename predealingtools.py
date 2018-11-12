@@ -2,6 +2,7 @@
 
 import sys
 import math
+import re
 
 # Step.1 単語のindex付け
 # フォーマットは <星の数> _SEP_ <分かち書き済レビュー文>
@@ -13,7 +14,7 @@ def term_indexer(review_path, term_index_path):
         for l in file.readlines():
             if l is None: continue
             ents = l.split(" __ SEP __ ") #ents[0] 星の数、 ents[1] レビュー文
-            if len(ents) < 2: continue
+            if len(ents) is not 2: continue
             terms = ents[1] #分かち書き済レビュー文
 
             terms = terms.split(" ")    # 単語のlist
@@ -36,7 +37,7 @@ def term_indexer(review_path, term_index_path):
 # <label> <index1>:<value1> <index2>:<value2> ...
 # 1 1:0.12 2:0.4 3:0.1 ...
 # 0 2:0.59 4:0.1 5:0.01 ...
-def svm_indexer(review_path, term_index_path):
+def svm_indexer(review_path, term_index_path, output_path):
     term_id = {}
     # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
     with open(term_index_path, 'r', encoding="utf-8") as term_index_file:
@@ -47,24 +48,24 @@ def svm_indexer(review_path, term_index_path):
             term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
 
     # <star> __ SEP __ <review sentence> ->
-    print("レビュー文中の単語の出現頻度と単語idを照合し、libsvm形式になおす")
+    print("レビュー文中の単語の出現頻度を単語idと照合し、libsvm形式になおす")
     with open(review_path, 'r', encoding="utf-8") as review_wakati_file:
         output = ""
-        for line in review_wakati_file.readlines():
+        for line in review_wakati_file.readlines():     # レビュー文ごと
             if line is None: continue
             ents = line.split(" __ SEP __ ")
             if len(ents) < 2: continue
+            if re.match("^[0-9]{1}.?[0-9]{0,2}$", ents[0].replace("\ufeff", "").replace(" ", "")) is None: continue
             star = float(ents[0].replace("\ufeff", "").replace(" ", ""))
             terms = ents[1]
 
-            # レビュー文中の単語の出現頻度　{<term1>:<freq1>, <term2>:<freq2>, ...}
+            # １つのレビュー文について、単語の出現回数を数える　{<term1>:<freq1>, <term2>:<freq2>, ...}
             term_freq = {}
-            for term in terms.split(" "):
+            for term in terms.split(" "):       # 1レビュー中の単語ごと
                 if term is '\n': continue
                 if not term in term_freq.keys(): term_freq[term] = 0.0
                 else: term_freq[term] += 1.0
-
-            # 単語のインデックスと頻度(log重み)　
+            # 数えた単語のidと頻度(log重み)を対応させる
             id_freq = {}
             for term in term_freq:
                 id_freq[term_id[term]] = round(math.log(term_freq[term] + 1.0), 3)
@@ -77,21 +78,22 @@ def svm_indexer(review_path, term_index_path):
             else : ans = str(0)
             #else : ans = str(-1)
             for id, freq in id_freq.items():
-                if id is not None:
-                    ans += " {0}:{1}".format(str(id), str(freq))
-                    # ans: <class> <key1>:<value1> <key2>:<value2> ...
+                if id is None: continue
+                ans += " {0}:{1}".format(str(id), str(freq))
+                # ans: <class> <key1>:<value1> <key2>:<value2> ...
             output += ans + '\n'
-            print(ans)
+            # print(ans)
 
-    with open("Data/svm_fmt_test1026.txt", 'w', encoding="utf-8") as out_file:
+    with open(output_path, 'w', encoding="utf-8") as out_file:
         out_file.write(output)
+    print("libsvm出力完了")
 
 # Step.3 機械学習
 # pythonバインディングができず保留
 
 # Step.4 学習結果と単語idを衝突させる
-#　重みとidを対応づける
 def weight_checker(term_index_path, model_path):
+    print("学習結果と単語idを照合し、極性辞書を出力する")
     term_id = {}
     # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
     with open(term_index_path, 'r', encoding="utf-8") as term_index_file:
@@ -103,21 +105,23 @@ def weight_checker(term_index_path, model_path):
 
     weight_id = {}
     i = 1
-    # {<weight1>:<index1>, <weight2>:<index2>, ...}
+    # modelファイルを読み、重みと単語idを対応づける
     with open(model_path, 'r', encoding="utf-8") as model_file:
         model = model_file.read().split('\n')
-        for line in model[6:]:
+        for line in model[6:]:  # modelファイルの6行目以降から
             weight_id.setdefault(line, i)
             i += 1
         weight_id = dict(sorted(weight_id.items()))
+        # {<weight1>:<index1>, <weight2>:<index2>, ...}
 
     dictionary_str = ""
     for weight, w_id in weight_id.items():
         for term, t_id in term_id.items():
             if w_id is t_id: dictionary_str += "{0} {1}\n".format(term, weight)
 
-    with open("Data/dictionary_test.txt", 'w', encoding="utf-8") as out_file:
+    with open("Data/dictionary_test1108.txt", 'w', encoding="utf-8") as out_file:
         out_file.write(dictionary_str)
+    print("辞書出力完了")
 
 
 
@@ -125,14 +129,15 @@ def weight_checker(term_index_path, model_path):
 
 if __name__ == '__main__':
     # レビュー文と単語idデータのパス
-    review_path = "Data/rakuten_reviews_wakati_test.txt"    # レビュー文
-    term_index_path = "Data/term_index_test1026.txt"        # 単語―id データ
-    model_path = "Data/svm_fmt_test1026.txt.model"          # 機械学習モデル
+    review_path = "Data/rakuten_reviews_wakati.txt"         # レビュー文
+    term_index_path = "Data/term_index_1108.txt"            # 単語―id データ
+    libsvm_data_path = "Data/svm_1108.fmt"  # libsvmフォーマットのデータ
+    model_path = "Data/svm_1108.fmt.model"          # 機械学習モデル
 
 
-    term_indexer(review_path, term_index_path)
+    #term_indexer(review_path, term_index_path)
 
-    svm_indexer(review_path, term_index_path)
+    #svm_indexer(review_path, term_index_path, libsvm_data_path)
 
     weight_checker(term_index_path, model_path)
 

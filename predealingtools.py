@@ -136,13 +136,12 @@ if __name__ == '__main__':
     term_index_path = "Data/term_index_1108.txt"            # 単語―id データ
     libsvm_data_path = "Data/svm_1108.fmt"  # libsvmフォーマットのデータ
     model_path = "Data/svm_1108.fmt.model"          # 機械学習モデル
+    dictionary_path = "Data/dictionary_1210_2.txt"
 
 
     #term_indexer(review_path, term_index_path)
-
     #svm_indexer(review_path, term_index_path, libsvm_data_path)
-
-    weight_checker(term_index_path, model_path)
+    #weight_checker(term_index_path, model_path, dictionary_path)
 
 
 sys.exit()

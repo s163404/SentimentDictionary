@@ -95,34 +95,34 @@ def svm_indexer(review_path, term_index_path, output_path):
 # pythonバインディングができず保留
 
 # Step.4 学習結果と単語idを衝突させる
-def weight_checker(term_index_path, model_path):
+def weight_checker(term_index_path, model_path, dictionary_path):
     print("学習結果と単語idを照合し、極性辞書を出力する")
-    term_id = {}
-    # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
+    id_term = {}
+    # term_indexファイルをロード
     with open(term_index_path, 'r', encoding="utf-8") as term_index_file:
         term_index = term_index_file.read()
-        for i in term_index.split('\n'):
-            term_index_pair = i.split(" ")
-            if len(term_index_pair) < 2: continue
-            term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
+    for i in term_index.split('\n'):
+        term_index_pair = i.split(" ")
+        if len(term_index_pair) < 2: continue
+        id_term.setdefault(int(term_index_pair[1]), term_index_pair[0], )
+        # {<index1>:<term1>, <index2>:<term2>,...}
 
-    weight_id = {}
+    id_weight = {}
     i = 1
     # modelファイルを読み、重みと単語idを対応づける
     with open(model_path, 'r', encoding="utf-8") as model_file:
         model = model_file.read().split('\n')
-        for line in model[6:]:  # modelファイルの6行目以降から
-            weight_id.setdefault(line, i)
-            i += 1
-        weight_id = dict(sorted(weight_id.items()))
-        # {<weight1>:<index1>, <weight2>:<index2>, ...}
+    for param in model[6:]:  # modelファイルの6行目以降からループを回す
+        id_weight.setdefault(i, param)
+        i += 1
+    #weight_id = dict(sorted(weight_id.items()))     # keyソート(重みでソート)
+    # {<index1>:<weight1>, <index2>:<weight2>, ...}
 
     dictionary_str = ""
-    for weight, w_id in weight_id.items():
-        for term, t_id in term_id.items():
-            if w_id is t_id: dictionary_str += "{0} {1}\n".format(term, weight)
+    for w_id, weight in id_weight.items():
+        if w_id in id_term.keys(): dictionary_str += "{0} {1}\n".format(id_term[w_id], weight)
 
-    with open("Data/dictionary_test1108.txt", 'w', encoding="utf-8") as out_file:
+    with open(dictionary_path, 'w', encoding="utf-8") as out_file:
         out_file.write(dictionary_str)
     print("辞書出力完了")
 

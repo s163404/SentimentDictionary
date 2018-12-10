@@ -5,26 +5,29 @@ import math
 import re
 
 # Step.1 単語のindex付け
-# フォーマットは <星の数> _SEP_ <分かち書き済レビュー文>
+# 入力フォーマットは<星の数> _SEP_ <分かち書き済レビュー文>
+# 出力フォーマットは<term1> <index1>\n<term2> <index2>\n...　
 def term_indexer(review_path, term_index_path):
     term_index = {}
     term_index_str = ""
     index_num = 1
+    sentences = []
+    print("単語のid付け")
     with open(review_path, 'r', encoding="utf-8") as file:
-        for l in file.readlines():
-            if l is None: continue
-            ents = l.split(" __ SEP __ ") #ents[0] 星の数、 ents[1] レビュー文
+        for line in file.readlines():
+            if line is None: continue
+            ents = line.split(" __ SEP __ ")  # ents[0] 星の数、 ents[1] レビュー文
             if len(ents) is not 2: continue
-            terms = ents[1] #分かち書き済レビュー文
+            sentences.append(ents[1])  # レビュー文
 
-            terms = terms.split(" ")    # 単語のlist
-            # term_indexのkeyに単語が登録されていなければ、valueにindexを振っていく
-            for term in terms:
-                if term in term_index.keys(): continue
-                term_index.setdefault(term, str(index_num))
-                term_index_str += "{0} {1}\n".format(term, str(index_num))
-                index_num += 1
-                # <term1> <index1><term2> <index2><term3> <index3>...
+    # レビューごとにループ、さらにネストでレビュー内の単語でループを回す
+    for sentence in sentences:
+        for term in sentence.split(" "):
+            if term in term_index.keys() or term is None or term is "\n": continue
+            # term_indexのkey(単語)に重複が無ければ、valueにindexを振っていく
+            term_index.setdefault(term, str(index_num))
+            term_index_str += "{0} {1}\n".format(term, str(index_num))
+            index_num += 1
 
     with open(term_index_path, 'w', encoding="utf-8") as out_file:
         out_file.write(term_index_str)

@@ -35,6 +35,7 @@ def term_indexer(review_path, term_index_path):
 
 
 # Step.2 フォーマット化
+# 評価4.0以上に1をラベル付け
 # 入力： <term1> <index1><term2> <index2><term3> <index3>
 # 出力： libsvmフォーマット
 # <label> <index1>:<value1> <index2>:<value2> ...
@@ -45,47 +46,43 @@ def svm_indexer(review_path, term_index_path, output_path):
     # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
     with open(term_index_path, 'r', encoding="utf-8") as term_index_file:
         term_index = term_index_file.read()
-        for i in term_index.split('\n'):
-            term_index_pair = i.split(" ")
-            if len(term_index_pair) < 2: continue
-            term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
+    for i in term_index.split('\n'):
+        term_index_pair = i.split(" ")
+        if len(term_index_pair) < 2: continue
+        term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
 
+    output = ""
     # <star> __ SEP __ <review sentence> ->
     print("レビュー文中の単語の出現頻度を単語idと照合し、libsvm形式になおす")
     with open(review_path, 'r', encoding="utf-8") as review_wakati_file:
-        output = ""
-        for line in review_wakati_file.readlines():     # レビュー文ごと
-            if line is None: continue
-            ents = line.split(" __ SEP __ ")
-            if len(ents) < 2: continue
-            if re.match("^[0-9]{1}.?[0-9]{0,2}$", ents[0].replace("\ufeff", "").replace(" ", "")) is None: continue
-            star = float(ents[0].replace("\ufeff", "").replace(" ", ""))
-            terms = ents[1]
+        reviews = review_wakati_file.read()
+    for line in reviews.split('\n'):     # レビュー文ごと
+        if line is None: continue
+        line = re.sub(" $|　$", "", line)  # 文末にあるスペースを削除してスペーススプリットのエラーに対応
+        ents = line.split(" __ SEP __ ")
+        if len(ents) is not 2 or ents[1] is "": continue
+        if re.match("^[0-9]{1}.?[0-9]{0,2}$", ents[0].replace("\ufeff", "").replace(" ", "")) is None: continue
+        star = float(ents[0].replace("\ufeff", "").replace(" ", ""))
+        terms = ents[1]
 
-            # １つのレビュー文について、単語の出現回数を数える　{<term1>:<freq1>, <term2>:<freq2>, ...}
-            term_freq = {}
-            for term in terms.split(" "):       # 1レビュー中の単語ごと
-                if term is '\n': continue
-                if not term in term_freq.keys(): term_freq[term] = 0.0
-                else: term_freq[term] += 1.0
-            # 数えた単語のidと頻度(log重み)を対応させる
-            id_freq = {}
-            for term in term_freq:
-                id_freq[term_id[term]] = round(math.log(term_freq[term] + 1.0), 3)
-            # {<id1>:<log_freq1>, <id2>:<log_freq2>, ...} idでソート
-            id_freq = dict(sorted(id_freq.items()))
+        # １つのレビュー文について、単語の出現回数を数える　{<id1>:<freq1>, <id2>:<freq2>, ...}
+        id_freq = {}
+        for term in terms.split(" "):
+            id = term_id[term]
+            if not id in id_freq.keys(): id_freq[id] = 0.0
+            else: id_freq[id] += 1.0
 
+        for id in id_freq.keys():
+            id_freq[id] = round(math.log(id_freq[id] + 1.0), 3)     # 出現回数のlog
+        id_freq = dict(sorted(id_freq.items()))  # idソート
 
-            # 星の数ラベル、単語インデックス、頻度重みをlibsvmフォーマットに
-            if star > 4.0: ans = str(1)
-            else : ans = str(0)
-            #else : ans = str(-1)
-            for id, freq in id_freq.items():
-                if id is None: continue
-                ans += " {0}:{1}".format(str(id), str(freq))
-                # ans: <class> <key1>:<value1> <key2>:<value2> ...
-            output += ans + '\n'
-            # print(ans)
+        # 星の数ラベル、単語インデックス、頻度重みを結合する
+        ans = "1" if star >= 4.0 else "0"
+        for id, freq in id_freq.items():
+            if id is None: continue
+            ans += " {0}:{1}".format(str(id), str(freq))
+            # ans: <class> <key1>:<value1> <key2>:<value2> ...
+        output += ans + '\n'
 
     with open(output_path, 'w', encoding="utf-8") as out_file:
         out_file.write(output)

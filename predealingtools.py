@@ -34,16 +34,16 @@ def term_indexer(review_path, term_index_path):
     print("単語のid付け完了")
 
 
-# Step.2 フォーマット化
-# 評価4.0以上に1をラベル付け
-# 入力： <term1> <index1><term2> <index2><term3> <index3>
-# 出力： libsvmフォーマット
-# <label> <index1>:<value1> <index2>:<value2> ...
+# Step.2 フォーマット
+# レビュー(評価の数、テキスト)をlibsvmの形式に直す
+# libsvm形式↓↓↓↓
+# <label> <id1>:<value1> <id2>:<value2> ...
 # 1 1:0.12 2:0.4 3:0.1 ...
 # 0 2:0.59 4:0.1 5:0.01 ...
 def svm_indexer(review_path, term_index_path, output_path):
     term_id = {}
-    # <term1> <index1>\n<term2> <index2>\n ... -> {<term1>:<index1>, <term2>:<index2>, ...}
+
+    # 1. 単語-id 辞書をロード
     with open(term_index_path, 'r', encoding="utf-8") as term_index_file:
         term_index = term_index_file.read()
     for i in term_index.split('\n'):
@@ -51,21 +51,37 @@ def svm_indexer(review_path, term_index_path, output_path):
         if len(term_index_pair) < 2: continue
         term_id.setdefault(term_index_pair[0], int(term_index_pair[1]))
 
+    # 2. 評価の数は1または0へ、テキストはidとlog出現回数重みへと変換
+    # レビュー一個ずつ見ていく
+    # 変換したレビューは1つの変数outputにまとめて
     output = ""
-    # <star> __ SEP __ <review sentence> ->
+    # <star> __ SEP __ <text>
     print("レビュー文中の単語の出現頻度を単語idと照合し、libsvm形式になおす")
     with open(review_path, 'r', encoding="utf-8") as review_wakati_file:
         reviews = review_wakati_file.read()
+    count = 0
     for line in reviews.split('\n'):     # レビュー文ごと
         if line is None: continue
+        count += 1
         line = re.sub(" $|　$", "", line)  # 文末にあるスペースを削除してスペーススプリットのエラーに対応
         ents = line.split(" __ SEP __ ")
-        if len(ents) is not 2 or ents[1] is "": continue
-        if re.match("^[0-9]{1}.?[0-9]{0,2}$", ents[0].replace("\ufeff", "").replace(" ", "")) is None: continue
-        star = float(ents[0].replace("\ufeff", "").replace(" ", ""))
-        terms = ents[1]
+        # 不正な形式をはじく
+        if len(ents) is not 2:
+            print("line{0} len(ents)≠2 {1}".format(count, str(ents)))
+            continue
+        if ents[1] is "":
+            print("line{0} テキスト無し {1}".format(count, str(ents)))
+            continue
+        if re.match("^[0-9]{1}$|^[0-9]{1}\.[0-9]{0,2}$", ents[0]        # 1桁の数字または小数点以下2の小数にマッチ
+                .replace("\ufeff", "")
+                .replace(" ", "")) is "":
+            print("line{0} 評価なし {1}".format(count, str(ents)))
+            continue
 
-        # １つのレビュー文について、単語の出現回数を数える　{<id1>:<freq1>, <id2>:<freq2>, ...}
+        star = float(ents[0].replace("\ufeff", "").replace(" ", ""))    # 星の数のスペースや文字コードを削除->floatの評価
+        terms = ents[1]                     # レビュー文
+
+        # １つのレビュー文における単語の出現回数を数える　{<id1>:<freq1>, <id2>:<freq2>, ...}
         id_freq = {}
         for term in terms.split(" "):
             id = term_id[term]
@@ -73,17 +89,25 @@ def svm_indexer(review_path, term_index_path, output_path):
             else: id_freq[id] += 1.0
 
         for id in id_freq.keys():
-            id_freq[id] = round(math.log(id_freq[id] + 1.0), 3)     # 出現回数のlog
+            id_freq[id] = round(math.log(id_freq[id]+1.0, 10), 3)     # 出現回数のlog
         id_freq = dict(sorted(id_freq.items()))  # idソート
 
-        # 星の数ラベル、単語インデックス、頻度重みを結合する
-        ans = "1" if star >= 4.0 else "0"
+        # 星の数でクラスをラベル付
+        # TODO 星の数の閾値調整
+        if star >= 3.5: ans = "1"
+        elif star < 3.5: ans = "0"      # 3.5未満⇒0, 3.5以上⇒1
+
+        # 単語indexと頻度の重みを文字列結合
         for id, freq in id_freq.items():
-            if id is None: continue
+            if id is None:
+                print("単語のidが振られていない" + str(ents))
+                continue
             ans += " {0}:{1}".format(str(id), str(freq))
-            # ans: <class> <key1>:<value1> <key2>:<value2> ...
+            # ansの形式↓
+            # <class> <key1>:<value1> <key2>:<value2> ...
         output += ans + '\n'
 
+    # 3. ファイル出力
     with open(output_path, 'w', encoding="utf-8") as out_file:
         out_file.write(output)
     print("libsvm出力完了")
@@ -104,20 +128,30 @@ def weight_checker(term_index_path, model_path, dictionary_path):
         id_term.setdefault(int(term_index_pair[1]), term_index_pair[0], )
         # {<index1>:<term1>, <index2>:<term2>,...}
 
-    id_weight = {}
-    i = 1
-    # modelファイルを読み、重みと単語idを対応づける
+    # 辞書
+    # {<id1>:<param1>,
+    #  <id2>:<param2>, ...}
+    id_param = {}
+    # modelから単語の重みを読み込み、idと対応づける
     with open(model_path, 'r', encoding="utf-8") as model_file:
         model = model_file.read().split('\n')
-    for param in model[6:]:  # modelファイルの6行目以降からループを回す
-        id_weight.setdefault(i, param)
+    i = 1  # id
+    for param in model[6:]:  # modelの6行目以降から
+        if param is "": continue
+        try:
+            id_param.setdefault(i, float(param.replace(' ', '')))
+        except ValueError as e: print("ValueError:{0}line{1} 「{2}」".format(e, i+6, param))
         i += 1
-    #weight_id = dict(sorted(weight_id.items()))     # keyソート(重みでソート)
-    # {<index1>:<weight1>, <index2>:<weight2>, ...}
 
+    id_param = dict(sorted(id_param.items(), key=lambda x: x[1]))       # paramでソート
+
+    # 対応するidを検索し、単語とparamを対応付ける
+    #   辞書id_term idと単語の対応
+    #   辞書id_param idと極性値の対応
+    #   一致するidからterm と paramを対応づける
     dictionary_str = ""
-    for w_id, weight in id_weight.items():
-        if w_id in id_term.keys(): dictionary_str += "{0} {1}\n".format(id_term[w_id], weight)
+    for w_id, param in id_param.items():
+        if w_id in id_term.keys(): dictionary_str += "{0} {1}\n".format(id_term[w_id], param)
 
     with open(dictionary_path, 'w', encoding="utf-8") as out_file:
         out_file.write(dictionary_str)
@@ -129,16 +163,15 @@ def weight_checker(term_index_path, model_path, dictionary_path):
 
 if __name__ == '__main__':
     # レビュー文と単語idデータのパス
-    review_path = "Data/rakuten_reviews_wakati.txt"         # レビュー文
-    term_index_path = "Data/term_index_1108.txt"            # 単語―id データ
-    libsvm_data_path = "Data/svm_1108.fmt"  # libsvmフォーマットのデータ
-    model_path = "Data/svm_1108.fmt.model"          # 機械学習モデル
-    dictionary_path = "Data/dictionary_1210_2.txt"
-
+    review_path = "Data/rakuten_reviews_wakati_fixed2.txt"         # レビュー文
+    term_index_path = "Data/term_index_0711.txt"            # 単語―id データ
+    libsvm_data_path = "Data/svm_0712_log10.fmt"  # libsvmフォーマットのデータ
+    model_path = "Data/svm_0712_log10.fmt.model"          # 機械学習モデル
+    dictionary_path = "Data/polarity_0712_log10.txt"
 
     #term_indexer(review_path, term_index_path)
     #svm_indexer(review_path, term_index_path, libsvm_data_path)
-    #weight_checker(term_index_path, model_path, dictionary_path)
+    weight_checker(term_index_path, model_path, dictionary_path)
 
 
 sys.exit()

@@ -59,7 +59,7 @@ def estimate_simple(dic_path, w_path, output_path):
         for term in text.split(' '):            # 単語１こずつ見ていく
             if term is "": continue
             if term not in term_pol.keys(): continue
-            else: pol.append(term_pol[term])
+            else: pol.append(term_pol[term])    # 極性値
 
         if len(pol) is 0: continue
         value = sum(pol) / len(pol)    # 単語数で感情値の平均をとる
@@ -89,24 +89,62 @@ def estimate_position(dic_path, w_path, output_path):
         if len(term_pol_pair) < 2: continue
         term_pol.setdefault(term_pol_pair[0], float(term_pol_pair[1]))
 
+    m = MeCab.Tagger("Chasen")  # parserの設定 Chasen
     # 2. 辞書を使ってテキストの平均感情値を算出
     output = ""
-    with open(w_path, 'r', encoding="utf-8") as f:
-        texts = f.read()
-    # テキストごと
+    with open(w_path, 'r', encoding="utf-8") as f: texts = f.read()
+    # テキスト毎
     for text in texts.split('\n'):
         if text is "": continue
+
+        # 単語(記号以外)と品詞情報を取り出す
+        kaiseki = re.findall(".+\t.{1,3}詞", m.parse(text))   # 解析結果から「単語<tab>〇〇詞」だけ取り出す
+        k_term = []
+        k_cate = []
+        k_posi = []
+        ct = 0
+        for i in kaiseki:
+            ct += 1
+            pair = i.split('\t')
+            k_term.append(pair[0])   # 単語
+            k_cate.append(pair[1])   # 品詞
+            k_posi.append(ct)        # 出現位置
+
+        # 極性値計算
         value = 0.0     # テキストの感情(極性)値
-        pol = []        # 単語の値リスト
-        for term in text.split(' '):            # 単語１こずつ見ていく
-            if term is "": continue
-            if term not in term_pol.keys(): continue
-            else: pol.append(term_pol[term])
+        pol = []        # 各単語の極性値
+
+        a = 1  # 出現位置パラメータ
+        length = len(k_term)  # text中の総単語数
+        for search_term in text.split(' '):
+            if search_term is "": continue
+            if search_term not in term_pol.keys(): continue    # 辞書にない単語
+            if search_term not in k_term: continue             # 解析結果にない単語
+
+            # 単語が解析結果に該当したとき
+            id = k_term.index(search_term)     # インデックスを取得
+            if re.match("助詞|助動詞", k_cate[id]): continue     # 助詞助動詞を除外
+
+            beta_p = term_pol[search_term] ** k_posi[id]
+            beta_lp = term_pol[search_term] ** (length - k_posi[id])
+            # 辞書極性値が負かつ偶数乗なら符号を反転
+            if term_pol[search_term] < 0:
+                if k_posi[id] % 2 is 0: beta_p = -beta_p
+                if length - k_posi[id] % 2 is 0: beta_lp = -beta_lp
+
+            c = a * beta_p + (1 - a) * beta_lp   # 重み付き極性値
+            pol.append(c)
+
+            # 重複単語への対応
+            k_term.pop(id)
+            k_cate.pop(id)
+            k_posi.pop(id)
+
 
         if len(pol) is 0: continue
-        value = sum(pol) / len(pol)    # 感情値の平均
+        mean = sum(pol) / len(pol)    # 感情値の平均
         sumpol = sum(pol)              # 感情値の合計
-        output += "{0} {1}\n".format(str(round(sumpol, 2)), text)
+        output += "{0} {1}\n".format(str(round(mean, 2)), text)
 
 
     # 3. ファイル出力
@@ -145,12 +183,13 @@ if __name__ == '__main__':
     text_path = "Data/Twitter/collected_texts08_test.txt"      # 生のテキストファイル　改行でセパレート
     w_text_path = re.sub(".txt", "_wakachi.txt", text_path)
     dictionary_path = "Data/polarity_0712_log10.txt"
-    estimated_path = re.sub(".txt", "_estimated2.txt", w_text_path)
+    estimated_path = re.sub(".txt", "_estimated4.txt", w_text_path)
 
     #wakachi(text_path, w_text_path)
     #estimate_simple(dictionary_path, w_text_path, estimated_path)
+    estimate_position(dictionary_path, w_text_path, estimated_path)
 
-    wakachi_test()
+    #wakachi_test()
 
 
 sys.exit()

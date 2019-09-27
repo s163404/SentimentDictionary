@@ -6,7 +6,9 @@
 
 '''
 
+import datetime
 import sys
+import math
 import MeCab
 import re
 
@@ -29,6 +31,35 @@ def wakachi(text_file, output):
     with open(output, 'w', encoding="utf-8") as f:
         f.write(wakachi_texts)
     print("完了")
+
+def shougou():
+    dic = []
+    comp = []
+    count = 0
+
+    with open("Data/polarity_2_log10.txt", 'r', encoding="utf-8") as dic_f:
+        term_polarity = dic_f.read()
+    for i in term_polarity.split('\n'):
+        term_pol_pair = i.split("\t")
+        if len(term_pol_pair) < 2: continue
+        dic.append(term_pol_pair[0])
+
+    with open("Data/term_index_0823.txt", 'r', encoding="utf-8") as comp_f:
+        term_num = comp_f.read()
+    for i in term_num.split('\n'):
+        term_num_pair = i.split(" ")
+        if len(term_num_pair) < 2: continue
+        comp.append(term_num_pair[0])
+        
+    for c_term in comp:
+        if c_term in dic: count += 1
+    print("辞書で見つかった単語{0}語".format(str(count)))
+
+
+
+def wakachi_text(text):
+    m = MeCab.Tagger("Chasen")    # parserの設定 分かち書き
+    print(m.parse(text))
 
 
 # 基本的な感情(極性)推定
@@ -77,6 +108,8 @@ def estimate_simple(dic_path, w_path, output_path):
 # 辞書はpredealingtools.pyで構築したものを使う
 # 入力は分かち書き済みのテキスト
 def estimate_position(dic_path, w_path, output_path):
+    ignore_ct = 0
+    words_intexts = 0
     m = MeCab.Tagger("Chasen")  # parserの設定 Chasen
     print(" " + w_path + " 中のテキストの極性を算出")
     print("⇒ " + output_path + "  に出力")
@@ -86,7 +119,7 @@ def estimate_position(dic_path, w_path, output_path):
     with open(dic_path, 'r', encoding="utf-8") as dic_f:
         term_polarity = dic_f.read()
     for i in term_polarity.split('\n'):
-        term_pol_pair = i.split(" ")
+        term_pol_pair = i.split("\t")
         if len(term_pol_pair) < 2: continue
         term_pol.setdefault(term_pol_pair[0], float(term_pol_pair[1]))
 
@@ -125,7 +158,9 @@ def estimate_position(dic_path, w_path, output_path):
         for search_term in text.split(' '):
             if search_term is "": continue
             if search_term not in k_term: continue              # 解析結果にない単語
-            if search_term not in term_pol.keys(): continue     # 辞書にない単語
+            if search_term not in term_pol.keys():
+                ignore_ct += 1
+                continue     # 辞書にない単語
             if term_pol[search_term] is 0.0: continue           # TODO 極性値0の単語への対応
 
             # 極性値0以外の単語が解析結果に在るとき
@@ -137,10 +172,11 @@ def estimate_position(dic_path, w_path, output_path):
                 k_posi.pop(id)
                 continue
 
-            # beta_p = term_pol[search_term] ** k_posi[id]
-            # beta_lp = term_pol[search_term] ** (length - k_posi[id])
+            words_intexts += len(k_term)        # 単語を数える
+
             beta_p = term_pol[search_term] * k_posi[id]
-            beta_lp = term_pol[search_term] * (length - k_posi[id])
+            # beta_lp = term_pol[search_term]
+            beta_lp = term_pol[search_term] * math.log((length - k_posi[id]) + 2, 2)  # 極性値×log_2{総単語数-位置) +2}
 
             # 辞書極性値が負かつ偶数乗なら符号を反転
             # if term_pol[search_term] < 0:
@@ -148,7 +184,8 @@ def estimate_position(dic_path, w_path, output_path):
             #     if (length - k_posi[id]) % 2 == 0: beta_lp = -beta_lp
 
             # 単語の重み付き極性値を算出
-            c = a * beta_p + (1 - a) * beta_lp   # 重み付き極性値
+            # c = a * beta_p + (1 - a) * beta_lp   # 重み付き極性値
+            c = beta_lp   # 重み付き極性値
             pol.append(c)
 
             # 重複単語への対応
@@ -163,12 +200,14 @@ def estimate_position(dic_path, w_path, output_path):
             continue
         mean = sum(pol) / len(pol)    # 感情値の平均
         sumpol = sum(pol)              # 感情値の合計
-        output += "{0} {1}\n".format(str(round(mean, 2)), text)
+        output += "{0}\t{1}\n".format(str(round(mean, 2)), text)
 
     # 3. ファイル出力
     with open(output_path, 'w', encoding="utf-8") as out_file:
         out_file.write(output)
     print("出力完了")
+    print("辞書に無かった単語" + str(ignore_ct))
+    print("文章の総単語数" + str(words_intexts))
 
 
 def wakachi_test():
@@ -194,18 +233,23 @@ def wakachi_test():
 
 
 if __name__ == '__main__':
-    dictionary_path = "Data/polarity_0712_log10.txt"
+    dictionary_path = "Data/polarity_2_log10.txt"
     text_path = "Data/Twitter/collected_texts08.txt"      # 生のテキストファイル　改行でセパレート
     w_text_path = re.sub(".txt", "_wakachi.txt", text_path)
     # w_text_path = "Data/Twitter/rakuten_reviews_wakachi_fixed2_texts.txt"
-    estimated_path = re.sub(".txt", "_estimated4.txt", w_text_path)
+    estimated_path = re.sub(".txt", "_estimated20.txt", w_text_path)
 
 
     #wakachi(text_path, w_text_path)
     #estimate_simple(dictionary_path, w_text_path, estimated_path)
     estimate_position(dictionary_path, w_text_path, estimated_path)
 
-    #wakachi_test()
+
+    # wakachi("C:/Users/KMLAB-02/PycharmProjects/SentimentDictionary/Data/Twitter/collected_texts_nega.txt", "C:/Users/KMLAB-02/PycharmProjects/SentimentDictionary/Data/Twitter/collected_texts_nega_wakachi.txt")
+    
+    # shougou()
+
+    print(datetime.datetime.now())
 
 
 sys.exit()

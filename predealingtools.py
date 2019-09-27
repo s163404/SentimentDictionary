@@ -2,12 +2,13 @@
 
 import sys
 import math
+import MeCab
 import re
 
 # Step.1 単語のindex付け
 # 入力フォーマットは<星の数> _SEP_ <分かち書き済レビュー文>
 # 出力フォーマットは<term1> <index1>\n<term2> <index2>\n...　
-def term_indexer(review_path, term_index_path):
+def term_indexer(review_path, term_index_path, flag):
     term_index = {}
     term_index_str = ""
     index_num = 1
@@ -16,14 +17,19 @@ def term_indexer(review_path, term_index_path):
     with open(review_path, 'r', encoding="utf-8") as file:
         for line in file.readlines():
             if line is None: continue
-            ents = line.split(" __ SEP __ ")  # ents[0] 星の数、 ents[1] レビュー文
+            if flag is True: ents = line.split(" __SEP__ ")
+            else:            ents = line.split(" __ SEP __ ")  # ents[0] 星の数、 ents[1] レビュー文
             if len(ents) is not 2: continue
             sentences.append(ents[1])  # レビュー文
 
     # レビューごとにループ、さらにネストでレビュー内の単語でループを回す
     for sentence in sentences:
+        if flag is True:  # flag=trueなら分かち書き
+            m = MeCab.Tagger("-Owakati")
+            sentence = m.parse(sentence)
+
         for term in sentence.split(" "):
-            if term in term_index.keys() or term is None or term is "\n": continue
+            if term in term_index.keys() or term is "" or term is "\n": continue
             # term_indexのkey(単語)に重複が無ければ、valueにindexを振っていく
             term_index.setdefault(term, str(index_num))
             term_index_str += "{0} {1}\n".format(term, str(index_num))
@@ -65,31 +71,38 @@ def svm_indexer(review_path, term_index_path, output_path):
         count += 1
         line = re.sub(" $|　$", "", line)  # 文末にあるスペースを削除してスペーススプリットのエラーに対応
         ents = line.split(" __ SEP __ ")
+        ents[0] = ents[0].replace("\ufeff", "").replace(" ", "")    # 余計なコード,スペースを削除
+
         # 不正な形式をはじく
         if len(ents) is not 2:
             print("line{0} len(ents)≠2 {1}".format(count, str(ents)))
             continue
+        if ents[0] is "":
+            print("line{0} 評価無し {1}".format(count, str(ents)))
+            continue
+        if re.match("^[0-9]{1}$|^[0-9]{1}\.[0-9]{0,2}$", ents[0]) is "":    # 1桁の数字または小数点以下2の小数にマッチ
+            print("line{0} N.NNまたはN にマッチしない {1}".format(count, str(ents)))
+            continue
+        try: i = float(ents[0])
+        except ValueError:
+            print("line{0} float型変換できない {1}".format(count, str(ents)))
+            continue
         if ents[1] is "":
             print("line{0} テキスト無し {1}".format(count, str(ents)))
             continue
-        if re.match("^[0-9]{1}$|^[0-9]{1}\.[0-9]{0,2}$", ents[0]        # 1桁の数字または小数点以下2の小数にマッチ
-                .replace("\ufeff", "")
-                .replace(" ", "")) is "":
-            print("line{0} 評価なし {1}".format(count, str(ents)))
-            continue
 
-        star = float(ents[0].replace("\ufeff", "").replace(" ", ""))    # 星の数のスペースや文字コードを削除->floatの評価
-        terms = ents[1]                     # レビュー文
+        star = float(ents[0])    # float
+        terms = ents[1]          # レビュー文
 
         # １つのレビュー文における単語の出現回数を数える　{<id1>:<freq1>, <id2>:<freq2>, ...}
         id_freq = {}
         for term in terms.split(" "):
             id = term_id[term]
-            if not id in id_freq.keys(): id_freq[id] = 0.0
+            if not id in id_freq.keys(): id_freq[id] = 1.0
             else: id_freq[id] += 1.0
 
         for id in id_freq.keys():
-            id_freq[id] = round(math.log(id_freq[id]+1.0, 10), 3)     # 出現回数のlog
+            id_freq[id] = round(math.log(id_freq[id]+1.0, 10), 3)     # 出現回数のlogをとって辞書valueを上書き
         id_freq = dict(sorted(id_freq.items()))  # idソート
 
         # 星の数でクラスをラベル付
@@ -151,7 +164,7 @@ def weight_checker(term_index_path, model_path, dictionary_path):
     #   一致するidからterm と paramを対応づける
     dictionary_str = ""
     for w_id, param in id_param.items():
-        if w_id in id_term.keys(): dictionary_str += "{0} {1}\n".format(id_term[w_id], param)
+        if w_id in id_term.keys(): dictionary_str += "{0}\t{1}\n".format(id_term[w_id], param)
 
     with open(dictionary_path, 'w', encoding="utf-8") as out_file:
         out_file.write(dictionary_str)
@@ -163,15 +176,17 @@ def weight_checker(term_index_path, model_path, dictionary_path):
 
 if __name__ == '__main__':
     # レビュー文と単語idデータのパス
-    review_path = "Data/rakuten_reviews_wakati_fixed2.txt"         # レビュー文
-    term_index_path = "Data/term_index_0711.txt"            # 単語―id データ
-    libsvm_data_path = "Data/svm_0712_log10.fmt"  # libsvmフォーマットのデータ
-    model_path = "Data/svm_0712_log10.fmt.model"          # 機械学習モデル
-    dictionary_path = "Data/polarity_0712_log10.txt"
+    review_path = "Data/Twitter/collected_texts0823_wakachi.txt"         # レビュー文
+    term_index_path = "Data/term_index_0823.txt"            # 単語―id データ
+    libsvm_data_path = "Data/svm_2_log10.fmt"  # libsvmフォーマットのデータ
+    model_path = "Data/svm_2_log10.fmt.model"          # 機械学習モデル
+    dictionary_path = "Data/polarity_2_log10.txt"
 
-    #term_indexer(review_path, term_index_path)
-    #svm_indexer(review_path, term_index_path, libsvm_data_path)
-    weight_checker(term_index_path, model_path, dictionary_path)
+
+
+    term_indexer(review_path, term_index_path, False)
+    # svm_indexer(review_path, term_index_path, libsvm_data_path)
+    # weight_checker(term_index_path, model_path, dictionary_path)
 
 
 sys.exit()

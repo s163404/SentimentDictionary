@@ -1,6 +1,7 @@
 # - coding: utf-8 -
 
 import csv
+import re
 import sys
 import time
 import json
@@ -12,7 +13,7 @@ CS_LIST = []
 AT_LIST = []
 AS_LIST = []
 
-with open("C:/Users/KMLAB-02/Twitter_Keys/TwitterAPIkeys.csv", 'r', encoding="utf-8") as f:
+with open("C:/Users/s1634/Twitter_Keys/newkeys.csv", 'r', encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader)
         for row in reader:
@@ -24,34 +25,128 @@ with open("C:/Users/KMLAB-02/Twitter_Keys/TwitterAPIkeys.csv", 'r', encoding="ut
 
 
 # APIインスタンス生成
-# インスタンスと今居るkey idを返す
+# 渡されたkey idが超過していた時の対応処理
+# return : apiインスタンス、現在のkey id
 def create_API(key_id):
-    if key_id > len(CK_LIST): key_id = 0
+    if key_id >= len(CK_LIST)-1: key_id = 0
     auth = tweepy.OAuthHandler(CK_LIST[key_id], CS_LIST[key_id])
     auth.set_access_token(AT_LIST[key_id], AS_LIST[key_id])
     return tweepy.API(auth), key_id
 
+def get_tweetobj(query:str):
+    api, key_id = create_API(0)
+    current_max_id = ""
+    while True:
+        try:
+            results = api.search(query,lang='ja', count=100, max_id=current_max_id)
+            for result in results:
+                print(result.text)
+                print("\n")
+            endresult = results[-1]
+            current_max_id = endresult.id_str
+        except tweepy.TweepError as e: api. key_id = create_API(key_id+1)
 
 # ワード検索
 def get_tweets_byquery(word:str):
-    api, key_id = create_API(0)
-    tweets = api.search(q=word, count=10)
-    for tweet in tweets:
-        text = text_former(tweet.text)
-        print(tweet.text + "\n")
+    texts = []  # 取得したテキストのリスト
+    api, key_id = create_API(0)     # 初期APIインスタンス
+    get_limit = 30000
+
+    """
+    レートリミット検証
+    """
+    remaining = check_limit(api, "/search/tweets")
+    if remaining < 100:  # 検証
+        # 1度目のリミット
+        key_id += 1
+        api, key_id = create_API(key_id)
+
+        remaining = check_limit(api, "/search/tweets")
+        if remaining < 100:  # 検証
+            # 2度目のリミット
+            print("remaining:{0} so sleep while 15min...".format(str(remaining)))
+            time.sleep(60 * 15)
+
+    """
+    初回の取得
+    """
+    results = api.search(word, lang='ja', count=100)
+
+    while True:
+        """
+        取得結果の確認 -> テキスト格納
+        """
+        # if len(results) is 0:
+        #     break
+
+        current_max_id = str(results[-1].id - 1)      # 一番古いstatus id -1
+
+        for result in results:
+            if re.match(r'^RT @.*', result.text): continue  # ただのRT
+            text = text_former(result.text)     # テキスト成形
+            print(text)
+            print(result.created_at)
+            texts.append(text)    # テキスト格納
+
+        if len(texts) >= get_limit: break
+
+        """
+        レートリミット検証
+        """
+        remaining = check_limit(api, "/search/tweets")
+        if remaining < 100:  # 検証
+            # 1度目のリミット
+            key_id += 1
+            api, key_id = create_API(key_id)
+
+            remaining = check_limit(api, "/search/tweets")
+            if remaining < 100:  # 検証
+                # 2度目のリミット
+                print("remaining:{0} so sleep while 15min...".format(str(remaining)))
+                time.sleep(60 * 15)
+
+        """
+        2回目以降の取得
+        前回のmax_idから遡って取得
+        """
+        try: results = api.search(word, lang='ja', count=100, max_id=current_max_id)
+        except: pass
+
+    """
+    取得終了 -> ファイルwrite
+    取得できたところまでwriteする
+    """
+    with open("Data/Twitter/iPhone11/texts_iphone11_10000.txt", 'w', encoding="utf-8") as f:
+        f.write('\n'.join(texts))
+
+
+
+# レートリミットチェック　api:twitterapiインスタンス,method:チェックしたいメソッド名
+def check_limit(api, method:str):
+    json = api.rate_limit_status()
+    if "search" in method: root = "search"
+    elif "users" in method: root = "users"
+    elif "statuses" in method: root = "statuses"
+
+    remaining = json["resources"][root][method]["remaining"]
+    return remaining
+
 
 # status id検索
 def get_bystatus(id: str):
     api, key_id = create_API(0)
     tweet = api.get_status(id)
-    print(tweet)
+    print(tweet.text)
+    return tweet
 
 
-# ツイート文章を成形する　作成中
-# 1. 改行を削除
-# 2
+# ツイート文を成形する　作成中
 def text_former(text: str):
+    # 1. 改行を削除
     if '\n' in text: text = text.replace('\n', '')
+    # 2. URL を除去
+    text = re.sub(r"https?://[\w/:%#\$&\?\(\)~\.=\+\-]+", "", text)
+
     return text
 
 
@@ -206,8 +301,8 @@ def get_bystatusid_list():
 
     # 収集が終了、ファイルへのテキスト書き込み
     # write_listtocsv("Data/Twitter/collected_texts20.csv", texts)
-    with open("Data/Twitter/collected_texts_nega.txt", 'w', encoding="utf-8") as f:
-        f.write('\n'.join(texts))
+    # with open("Data/Twitter/collected_texts_nega.txt", 'w', encoding="utf-8") as f:
+    #     f.write('\n'.join(texts))
 
 
 # 作成中 status idリストでツイートを集め、メタ情報とともにCSVに出力
@@ -313,7 +408,10 @@ if __name__ == '__main__':
     # get_tweets_bystatusids()
     get_bystatusid_list()
     # get_tweets_tocsv()
-    # get_tweets_byquery("バイリー")
+    # get_tweetobj("\"虫さん\"|\"虫眼鏡\"")
+    # get_tweets_byquery("\"iPhone 11\"|\"iPhone11\"")
+    # print(get_bystatus("1184079485039079424"))
+
 
 
 sys.exit()

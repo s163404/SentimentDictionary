@@ -1,6 +1,7 @@
 # - coding: utf-8 -
 
 import sys
+import tools
 import math
 import MeCab
 import re
@@ -31,6 +32,8 @@ def term_indexer(review_path, term_index_path, flag):
         for term in sentence.split(" "):
             if term in term_index.keys() or term is "" or term is "\n": continue
             # term_indexのkey(単語)に重複が無ければ、valueにindexを振っていく
+            list = tools.mecab_tolist(term)
+            if list[1] != "形容詞" and list[1] != "動詞" and list[1] != "形容動詞": continue
             term_index.setdefault(term, str(index_num))
             term_index_str += "{0} {1}\n".format(term, str(index_num))
             index_num += 1
@@ -185,8 +188,8 @@ if __name__ == '__main__':
 
 
     term_indexer(review_path, term_index_path, False)
-    # svm_indexer(review_path, term_index_path, libsvm_data_path)
-    # weight_checker(term_index_path, model_path, dictionary_path)
+    svm_indexer(review_path, term_index_path, libsvm_data_path)
+    weight_checker(term_index_path, model_path, dictionary_path)
 
 
 sys.exit()

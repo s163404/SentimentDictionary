@@ -3,6 +3,7 @@
 賛否の度合いを考慮した特徴語の抽出
 """
 
+import csv
 import MeCab
 import mojimoji
 import re
@@ -17,7 +18,7 @@ from pymongo import MongoClient
 
 """
 極性辞書読み込み
--極性値の絶対値に閾値を設定
+-極性値の絶対値に閾値thresを設定
 -1文字の極性語をはじく
 -別コレクションに登録
 """
@@ -44,6 +45,11 @@ def load_worddict(thres:float):
 
 """
 モジュール1. 評価表現文の抽出
+入力：テキスト
+出力：評価表現文EVsentence
+テキストを、極性辞書中の単語を含む単一の文を評価表現文とし、取り出す
+
+
 """
 def ext_evalsentence():
     ev_sentences = []
@@ -88,6 +94,7 @@ def ext_evalsentence():
 
 """
 def det_polarity():
+    print("特徴語抽出と極性判定")
     client = MongoClient('localhost', 27017)
     db = client.tweet_db
     ev_sentences = [doc["EVsentence"] for doc in db.EVs_over05.find()]
@@ -97,10 +104,13 @@ def det_polarity():
     for ev_sentence in ev_sentences:
         ca_lists = []
         po_tuples = []
+        ev_sentence = ev_sentence.replace("iphone", "iPhone")
+        ev_sentence = ev_sentence.replace("Iphone", "iPhone")
+        ev_sentence = ev_sentence.replace("IPHONE", "iPhone")
         for node in mecab_tolist(ev_sentence):  # (word, class1, class2, class3, origin(or""), position)
             # 特徴語候補抽出
             if node[1] == "名詞":
-                if "iPhone" in node[0] or "iphone" in node[0]: continue
+                if "iPhone" in node[0]: continue
                 if node[2] != "非自立" and node[2] != "形容動詞語幹" \
                         and node[2] != "代名詞" and node[2] != "副詞可能" \
                         and node[2] != "接尾":
@@ -164,6 +174,7 @@ def det_polarity():
 出力：
 """
 def ext_featurewords():
+    print("特徴度算出")
     client = MongoClient('localhost', 27017)
     db = client.tweet_db
     docs = db.ca_featureword.find(projection={'_id':0})
@@ -200,7 +211,7 @@ def tesst():
         if node[1] == "名詞":
             if node[2] != "非自立" and node[2] != "形容動詞語幹" \
                     and node[2] != "代名詞" and node[2] != "副詞可能" \
-                    and node[2] != "接尾":
+                    and node[2] != "接尾" and node[2] != "固有名詞":
                 ca_lists.append([node[0], node[-1], 1000])   # [word, position, temp_dist]
         # 極性語抽出
         if node[1] != "名詞" and node[0] in worddict.keys():
@@ -245,13 +256,22 @@ def tesst():
 
 
 def ttt():
-    post = {"word": "う", "num": 3, "check": 3}
-    str = "iPhone 8をヤフオクで売却できたので、"
-    list = mecab(str, "-Owakati").split(" ")
-    i = 1
-    for w in list:
-        print("{0}\n{1}".format(i, mecab_tolist(w)))
-        i += 1
+    print(tools.mecab_tolist("iphone 11を1000個拾ったよ。そのあと起動してみたよ。"))
+
+
+def DBtotxt():
+    client = MongoClient('localhost', 27017)
+    db = client.tweet_db
+    col = db.unique_tweets
+
+    docs = col.find(projection={'_id':0})
+
+    with open("Data/unique_tweets.csv", "w", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for doc in docs:
+            writer.writerow([doc["text"], doc["id"], doc["created_at"]])
+
+
 
 
 def main():
@@ -261,7 +281,7 @@ def main():
     # test()
     # print(mecab("iPhone 11 Pro欲しい", "-Ochasen"))
     ttt()
-
+    # DBtotxt()
 
 if __name__ == '__main__':
     main()

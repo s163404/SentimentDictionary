@@ -37,7 +37,16 @@ def trans_texts(N:int):
     print("テキスト読み込み")
     client = MongoClient('localhost', 27017)
     db = client.tweet_db
-    col = db.combined1113
+    """
+    入出力先設定
+    """
+    col = db.Alldomain_exceptRingfA # 入力
+    csv_path = "Data/Topicmodel/texts_Alldomain_exceptRingfA.csv"  # 出力先
+    # csv_path = "Data/Topicmodel/texts_AirpodsPro.csv"  # 出力先
+    # csv_path = "Data/Topicmodel/texts_AppleWatch5.csv"  # 出力先
+    # csv_path = "Data/Topicmodel/texts_RingfA.csv"  # 出力先
+    # csv_path = "Data/Topicmodel/texts_GoproHero8.csv"   # 出力先
+    # csv_path = "Data/Topicmodel/texts_FitbitVersa2.csv"   # 出力先
 
     docs = col.find(projection={'_id': 0})
     raw_texts = []
@@ -52,6 +61,7 @@ def trans_texts(N:int):
         # 生テキストを前処理
         text = tools.pre_process(text)
 
+        if not text: continue
         # 単語単位の前処理
         nodes = tools.mecab_tolist(text)
         for node in nodes:
@@ -72,6 +82,10 @@ def trans_texts(N:int):
                     and node[2] != "接尾" \
                     and node[2] != "数" \
                     and node[2] != "サ変接続" \
+                    and node[2] != "特殊" \
+                    and node[2] != "引用文字列" \
+                    and node[2] != "接続詞的" \
+                    and node[2] != "形容動詞語幹" \
                     and node[2] != "固有名詞":
                 words.append(word)
 
@@ -87,7 +101,7 @@ def trans_texts(N:int):
         # if words: processed_texts.append(words)
 
     # CSV化
-    with open("Data/Topicmodel/texts_combined1113{0}.csv".format(N), 'w', encoding="utf-8") as f:
+    with open(csv_path, 'w', encoding="utf-8") as f:
         writer = csv.writer(f, lineterminator='\n')
         writer.writerows(processed_texts)
         f.close()
@@ -105,10 +119,11 @@ def lda_test():
     M = 50000   # テキスト数
     NO_BELOW = 100    # 出現文書数が指定値以下の語を除外    目安300
     NO_ABOVE = 1.0  # 10割以上の文書に登場した語除外
+    INPUT_PATH = "Data/Topicmodel/texts_iphone11.csv"
 
     print("処理済のテキスト集合(単語リスト)を呼び出し")
     texts = []
-    with open("Data/Topicmodel/texts{0}.csv".format(M), 'r', encoding="utf-8") as f:
+    with open(INPUT_PATH, 'r', encoding="utf-8") as f:
         for row in csv.reader(f): texts.append(row)
 
     print("テキストコーパス作成～LDA学習")
@@ -130,7 +145,7 @@ def lda_test():
                                                 num_topics=T,
                                                 id2word=dictionary,
                                                 random_state=1)
-    for t in range(T): print(t, lda_bayes.get_topic_terms(t))
+    # for t in range(T): print(t, lda_bayes.get_topic_terms(t, W))
     pprint(lda_bayes.show_topics())
 
     print("トピック抽出結果をnumpy行列に加工")
@@ -153,18 +168,18 @@ def lda_test():
             one_topic.append(tuple)
         topic_wid_prob_list.append(one_topic)
 
-    #ヘッダ行を作る header ⇒[トピック番号, 単語id, 単語id, ...]
+    #ヘッダ行を作る header ⇒[トピック番号, "単語id", "単語id", ...]
     header = []
-    header.append("topicnum")
-    for l in topic_wid_prob_list:
-        for tuple in l:
-            if not tuple[1] in header: header.append(tuple[1])  # 未登録の単語idを登録
+    # header.append("topicnum")                                   # ====トピック番号を考慮する場合====
+    for topic in topic_wid_prob_list:
+        for tuple in topic:
+            if tuple[1] not in header: header.append(tuple[1])  # 未登録の単語idを登録
 
     topic_array = np.empty((0, len(header)), float)  # K-meansに渡すnumpyparray
     for topic in topic_wid_prob_list:
         insert_list = [0] * len(header)
         t = topic[0]
-        insert_list[0] = t[0]
+        # insert_list[0] = t[0]                                   # ====トピック番号を考慮する場合====
         for tuple in topic:
             index = header.index(tuple[1])
             if index: insert_list[index] = tuple[2]
@@ -188,10 +203,16 @@ def lda_test():
     kmeans_model = KMeans(n_clusters=C, random_state=1).fit(topic_array) # K-Meansクラスタリング
     labels = kmeans_model.labels_
 
-    clus_topic = {}     # {cluster: [topicnums] }
-    for label, tarray in zip(labels, topic_array):
+    clus_topic = {}     # {cluster: [topicnums] } keyはクラスタラベル、valueはトピック番号リスト
+
+    # for label, tarray in zip(labels, topic_array):
+    #     if label not in clus_topic: clus_topic[label] = []
+    #     topicnum = int(tarray[0])
+    #     clus_topic[label].append(topicnum)
+    # 上：====トピック番号を考慮する場合====
+    # 下：====トピック番号を考慮しない場合====
+    for label, topicnum in zip(labels, range(T)):
         if label not in clus_topic: clus_topic[label] = []
-        topicnum = int(tarray[0])
         clus_topic[label].append(topicnum)
 
     for cluster, topicnums in clus_topic.items():

@@ -40,13 +40,8 @@ def trans_texts(N:int):
     """
     入出力先設定
     """
-    col = db.Alldomain_exceptRingfA # 入力
-    csv_path = "Data/Topicmodel/texts_Alldomain_exceptRingfA.csv"  # 出力先
-    # csv_path = "Data/Topicmodel/texts_AirpodsPro.csv"  # 出力先
-    # csv_path = "Data/Topicmodel/texts_AppleWatch5.csv"  # 出力先
-    # csv_path = "Data/Topicmodel/texts_RingfA.csv"  # 出力先
-    # csv_path = "Data/Topicmodel/texts_GoproHero8.csv"   # 出力先
-    # csv_path = "Data/Topicmodel/texts_FitbitVersa2.csv"   # 出力先
+    col = db.GoproHero8 # 入力
+    csv_path = "Data/Topicmodel/texts_GoproHero8.csv"  # 出力先
 
     docs = col.find(projection={'_id': 0})
     raw_texts = []
@@ -74,9 +69,9 @@ def trans_texts(N:int):
                     break
             if flag is True: continue
             if "iphone" in word: continue
-            if len(word) == 1 and re.search(r'[\u30A1-\u30F4]', word): continue
-            if len(word) == 1 and re.search(r'[あ-ん]', word): continue
-            if len(word) == 1 and re.search(r'[a-z]', word): continue
+            if len(word) == 1 and re.search(r'[\u30A1-\u30F4]', word): continue     # カタカナ
+            if len(word) == 1 and re.search(r'[あ-ん]', word): continue              # ひらがな
+            if len(word) == 1 and re.search(r'[a-z]', word): continue               # アルファベット
             # 名詞を抜き出す
             if node[1] == "名詞" \
                     and node[2] != "接尾" \
@@ -116,10 +111,18 @@ def lda_test():
     T = 5   # トピック数
     W = 20  # トピックから取り出す単語の数
     C = 3   # クラスタ数
-    M = 50000   # テキスト数
-    NO_BELOW = 100    # 出現文書数が指定値以下の語を除外    目安300
+    NO_BELOW = 120
     NO_ABOVE = 1.0  # 10割以上の文書に登場した語除外
     INPUT_PATH = "Data/Topicmodel/texts_iphone11.csv"
+    FPM_PATH = "Data/Topicmodel/result_FPM.txt"
+
+    print("")
+    print("INPUTPATH: " + INPUT_PATH)
+    print("T= " + str(T))
+    print("W= " + str(W))
+    print("C= " + str(C))
+    print("NO_BELOW= " + str(NO_BELOW))
+    print("NO_ABOVE= " + str(NO_ABOVE))
 
     print("処理済のテキスト集合(単語リスト)を呼び出し")
     texts = []
@@ -223,27 +226,43 @@ def lda_test():
         print("-" * 150)
 
 
-    print("\n=============頻出パターン抽出(FP-Growth)=============")
+    result_FPM = ""
+    print("\n=============頻出する属性語抽出(FP-Growth)=============")
     # 各クラスタに属する各トピックの単語のidを頻出パターン抽出
     for cluster, tnum_list in clus_topic.items():   # clus_topic = {クラスタ番号: トピック番号リスト }
-        print("クラスタ: {0}".format(str(cluster)))
+        print("\nクラスタ: {0}".format(str(cluster)))
+        result_FPM += "\nクラスタ: {0}\n".format(str(cluster))
         transactions = []
+        topic_count = 0
         for topic in tnum_list:
             w_ids = []
             for tuple in lda_bayes.get_topic_terms(topic, W):
                 w_ids.append(int(tuple[0]))
             transactions.append(w_ids)
+            topic_count += 1
 
-        itemsets = frequent_itemsets(transactions, 2)   # 頻出アイテム集合
-        for tuple in itemsets:
-            print(tuple, end="")
-            print(" ⇒ { ", end="")
-            for id in tuple[0]:
-                word = id_w_dict[id]
-                print(word + ", ", end="")
-            print("｝", end="")
-            print(tuple[1])
+        if len(transactions) == 1:
+            print("トランザクションの要素数1")
+            result_FPM += "トランザクションの要素数1\n"
+        else:
+            itemsets = frequent_itemsets(transactions, 2)  # 頻出アイテム集合
+            print("len(transactions): {0}".format(len(transactions)))
+            result_FPM += "len(transactions): {0}\n".format(len(transactions))
+            for tuple in itemsets:
+                # print(tuple, end="")
+                print("( ", end="")
+                result_FPM += "( "
+                for id in tuple[0]:
+                    word = id_w_dict[id]
+                    print(word + ", ", end="")
+                    result_FPM += word + ", "
+                print(")Ｘ ", end="")
+                result_FPM += ")Ｘ "
+                print(tuple[1])
+                result_FPM += "{0}\n".format(str(tuple[1]))
 
+    with open(FPM_PATH, 'w', encoding="utf-8") as f:
+        f.write(result_FPM)
 
 
     print("終了")

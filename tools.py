@@ -38,7 +38,8 @@ def pre_process(text:str):
     text = ''.join(c for c in text if c not in emoji.UNICODE_EMOJI)
     text = re.sub(r'[\U0001F300-\U0001F5FF]+', '', text)
     # 表現フィルター
-    text = text.replace("モイ!iphoneからキャス配信中", "")
+    if "モイ!iphoneからキャス配信中" in text:
+        text = ""
     return text
 
 
@@ -85,15 +86,31 @@ def import_dict():
     print("極性辞書をDBにインポート")
     # MongoDB呼び出し
     client = MongoClient('localhost', 27017)
-    db = client.worddict
-    collection = db.log10_over05
+    db = client.word_dict
+    collection = db.pn_takamura
 
-    # 極性語を抜き出す
-    with open("Data/polarity_2_log10.txt", 'r', encoding="utf-8") as f:
+    # # 極性語を抜き出す
+    # with open("Data/wago_pn.txt", 'r', encoding="utf-8") as f:
+    #     for row in f.readlines():
+    #         pair = row.replace('\n', '').split('\t')
+    #         word = pair[1]
+    #         if "ポジ" in pair[0]: param = 1
+    #         else: param = -1
+    #         # if abs(param) < 0.5: continue
+    #         post = {
+    #             "word": word,
+    #             "param": param
+    #         }
+    #         collection.insert_one(post)
+
+    with open("Data/pn_ja.txt", 'r', encoding="utf-8") as f:
         for row in f.readlines():
-            pair = row.replace('\n', '').split('\t')
-            word = pair[0]
-            param = float(pair[1])
+            items = row.split(':')
+            if items[2] == "名詞" or items[2] == "副詞": continue
+
+            word = items[0]
+            if float(items[3]) > 0: param = 1
+            else: param = -1
             post = {
                 "word": word,
                 "param": param

@@ -5,12 +5,15 @@
 """
 
 import csv
+import datetime
 import emoji
 import MeCab
 import mojimoji
 import neologdn
+import pytz
 import re
 import sys
+import time
 
 from pymongo import MongoClient
 
@@ -20,6 +23,10 @@ from pymongo import MongoClient
 出力：str
 """
 def pre_process(text:str):
+    # リプ宛先除去
+    text = re.sub(r'@.{1,15} ', '', text)
+    text = re.sub(r'@.{1,15}さんから', '', text)
+    # text = re.sub(r'^(@.{1,15} (?=)){1,2}', '', text)
     # 正規化
     # -アルファベット：全→半
     # -カタカナ：半→全
@@ -30,8 +37,6 @@ def pre_process(text:str):
     text = text.lower()
     # URL除去
     text = re.sub(r'https?://[\w/:%#\$&\?\(\)~\.=\+\-]+', '', text)
-    # リプ宛先除去
-    text = re.sub(r'^(@.{1,15} (?=)){1,2}', '', text)
     # 数字の","除去
     text = re.sub(r'(\d)([,.])(\d+)', r'\1\3', text)
     # 絵文字  -----文字自体消せず。品詞が「名詞」→「記号」になるのみ
@@ -40,6 +45,23 @@ def pre_process(text:str):
     # 表現フィルター
     if "モイ!iphoneからキャス配信中" in text:
         text = ""
+
+    """
+    同義語変換
+    preprocess 内にいれるか、
+    transtext単語単位の処理内にいれるか
+    """
+    dougigo = {}
+    with open("Data/dougigo_test.csv", 'r', encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if not row: continue
+            dougigo.setdefault(row[0], row[1])
+
+    for k, v in dougigo.items():
+        text = text.replace(k, v)
+
+
     return text
 
 
@@ -187,6 +209,31 @@ def importcsvtoDB():
             }
             col.insert_one(post)
 
+
+"""
+UTC時間をJST時間に補正
+"""
+def change_time(created_at):
+    st = time.strptime(created_at, '%a %b %d %H:%M:%S +0000 %Y')  # time.struct_timeに変換
+    utc_time = datetime.datetime(st.tm_year, st.tm_mon, st.tm_mday, \
+                                 st.tm_hour, st.tm_min, st.tm_sec,
+                                 tzinfo=datetime.timezone.utc)  # datetimeに変換(timezoneを付与)
+    jst_time = utc_time.astimezone(pytz.timezone("Asia/Tokyo"))  # 日本時間に変換
+    str_time = jst_time.strftime("%Y-%m-%d %H:%M:%S")  # 文字列で返す
+    return str_time
+
+
+def update_collection():
+    client = MongoClient('localhost', 27017)
+    db = client.tweet_db
+    col = db.www
+    docs = col.find()
+    for doc in docs:
+        # doc = col.find_one()
+        date = doc["created_at"]
+        if re.search(r'^[A-Za-z].+', date):
+            doc["created_at"] = change_time(date)
+            col.save(doc)
 
 
 def tes():

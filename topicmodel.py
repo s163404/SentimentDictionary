@@ -22,9 +22,7 @@ from pymongo import MongoClient
 from sklearn.cluster import KMeans
 from statistics import mean
 
-
 os.environ['MALLET_HOME'] = "C:\\Users\\KMLAB-02\\mallet-2.0.8"
-
 
 """
 テキストを単語のリストに変換
@@ -33,60 +31,104 @@ os.environ['MALLET_HOME'] = "C:\\Users\\KMLAB-02\\mallet-2.0.8"
 - テキスト前処理
 - 条件に合う名詞を取り出す
 """
-def trans_texts():
+def trans_texts(DIRECTORY_PATH:str, pnum:int, ctrlHenkan:bool):
+    STOPWORD_PATH = DIRECTORY_PATH+"stopwords_1217.txt"
+    DOUGIGO_PATH = DIRECTORY_PATH+"dougigo_1217.csv"
+    # ストップワード読み込み
+    stopwords = []
+    with open(STOPWORD_PATH, 'r', encoding="utf-8") as f:
+        for word in f.read().split('\n'):
+            if word: stopwords.append(word)
+    # 同義語読み込み
+    dougigo = {}
+    with open(DOUGIGO_PATH, 'r', encoding="utf-8") as f:
+        for row in csv.reader(f):
+            if not row: continue
+            if len(row) != 2: continue
+            dougigo.setdefault(row[0], row[1])
+
     print("テキスト読み込み")
     client = MongoClient('localhost', 27017)
-    """
-    入力元
-    """
     db = client.tweet_db
 
-    col = db.unique_tweets
+    # 入出力先設定
+    if pnum == 1:
+        col = db.unique_tweets                                  # 入力元
+        csv_path = DIRECTORY_PATH+"texts_iphone11.csv"    # 出力先
+    elif pnum == 2:
+        col = db.AirpodsPro
+        csv_path = DIRECTORY_PATH+"texts_AirpodsPro.csv"
+    elif pnum == 3:
+        col = db.AppleWatch5
+        csv_path = DIRECTORY_PATH+"texts_Applewatch5.csv"
+    elif pnum == 4:
+        col = db.GoproHero8
+        csv_path = DIRECTORY_PATH+"texts_Goprohero8.csv"
+    elif pnum == 5:
+        col = db.FireHD10
+        csv_path = DIRECTORY_PATH+"texts_Firehd10.csv"
+
+    # unique_tweets-iphone11
+    # AirpodsPro-AirpodsPro
+    # AppleWatch5-AppleWatch5
+    # GoproHero8-GoproHero8
+    # FireHD10-FireHD10
+
     raw_texts = []
     for doc in col.find(projection={'_id': 0}):
         if doc["text"] is not None: raw_texts.append(doc["text"])
-    """
-    出力先
-    """
-    csv_path = "Data/Topicmodel/textst_ip4544444hone11.csv"
-                            # unique_tweets-iphone11
-                            # AirpodsPro-AirpodsPro
-                            # AppleWatch5-AppleWatch5
-                            # GoproHero8-GoproHero8
-
-    # ストップワード
-    stopwords = []
-    with open("Data/Topicmodel/stopwords_test.txt", 'r', encoding="utf-8") as f:
-        for word in f.read().split('\n'):
-            if word: stopwords.append(word)
 
 
     print("テキストを単語群で表現")
-    processed_texts = []
+    words_of_texts = []
     for text in raw_texts:
         words = []
         # URL付きツイートはスキップ
         if re.search(r'https?://[\w/:%#\$&\?\(\)~\.=\+\-]+', text): continue
-
         # テキスト前処理
-        text = tools.pre_process(text)
+        if ctrlHenkan == True:
+            """
+            True
+            分かち書きしてから同義語変換
+            """
+            text = tools.pre_process(text, DOUGIGO_PATH, False)   # テキスト前処理で同義語変換しない
+
+            wakati_text = tools.mecab(text, "-Owakati").split(" ")
+            for keitaiso in wakati_text:
+                for origin, henkan in dougigo.items():
+                    if keitaiso == origin: keitaiso = henkan    # 変換できる語は置換
+            text = ''.join(wakati_text)
+
+        else:
+            """
+            False
+            分かち書きせずに同義語変換
+            pre_preprocessメソッド内で変換
+            """
+            text = tools.pre_process(text, DOUGIGO_PATH, True)
+
         if not text: continue
 
-        # 単語単位前処理
+
+        # 形態素単位前処理
         nodes = tools.mecab_tolist(text)
         for node in nodes:
-            flag = False
             word = node[0]
+            flag = False
             # ストップワードをスキップ
             for stopword in stopwords:
                 if word == stopword:
                     flag = True
                     break
             if flag is True: continue
-            if "iphone" in word: continue       # 商品名はスキップ
+
+            # 商品名をスキップ
+            if "iphone" in word: continue
             if "airpods" in word: continue
-            if "apple watch" in word:continue
+            if "applewatch" in word:continue
+            if "apple watch" in word: continue
             if "gopro" in word:continue
+            if "fire" in word: continue
 
             if len(word) == 1 and re.search(r'[\u30A1-\u30F4]', word): continue     # 1文字カタカナ
             if len(word) == 1 and re.search(r'[あ-ん]', word): continue              # 1文字ひらがな
@@ -95,18 +137,14 @@ def trans_texts():
             if node[1] == "名詞" and node[2] == "一般":
                 words.append(word)  # 名詞-一般
 
-        if words: processed_texts.append(words)
+        if words: words_of_texts.append(words)
 
-
-    print(csv_path + "に出力")
     # CSV化
+    print(csv_path + "に出力")
     with open(csv_path, 'w', encoding="utf-8") as f:
         writer = csv.writer(f, lineterminator='\n')
-        writer.writerows(processed_texts)
+        writer.writerows(words_of_texts)
         f.close()
-
-    return processed_texts
-
 
 
 """
@@ -118,8 +156,8 @@ def lda():
     C = T   # クラスタ数
     NO_BELOW = 1
     NO_ABOVE = 1.0  # 10割以上の文書に登場した語除外
-    INPUT_PATH = "Data/Topicmodel/texts2_AppleWatch5.csv"
-    FPM_PATH = "Data/Topicmodel/result_FPM.txt"
+    INPUT_PATH = "Data/Topicmodel/1217/texts_FireHD10.csv"
+    FPM_PATH = "Data/Topicmodel/1217/FPM_FireHD10.txt"
 
     print("\nINPUTPATH: " + INPUT_PATH)
     print("T= " + str(T))
@@ -294,11 +332,15 @@ def lda():
 
 """
 トピック数とαパラメータの検討
+- alpha: LDAのパラメータα
+- mean: 
+
+https://fits.hatenablog.com/entry/2018/03/13/214609
 """
-def lda_topicnum_alpha():
+def exam_lda_topic_alpha():
     NO_BELOW = 1
     NO_ABOVE = 1.0  # 10割以上の文書に登場した語除外
-    INPUT_PATH = "Data/Topicmodel/texts2_iphone11.csv"
+    INPUT_PATH = "Data/Topicmodel/1217/texts_Firehd10.csv"
     print(INPUT_PATH + "について")
 
     print("処理済テキスト(単語集合)を呼び出し")
@@ -326,7 +368,7 @@ def lda_topicnum_alpha():
     # for t in range(T): print(lda.print_topic(t, W))
     # pprint(lda_bayes.show_topics())
 
-    for t in range(2, 30, 2):
+    for t in range(2, 30, 1):
         for n in range(1, 10, 4):
             a = n / 100
 
@@ -385,7 +427,7 @@ def hdp():
                    )
 
     alpha = hdp.hdp_to_lda()[0] #LDA対応のαパラメータ
-    pprint(hdp.show_topics(num_topics=40))
+    pprint(hdp.show_topics(num_topics=150))
     hdp.show_topics(num_topics=-1)
     # print(hdp.get_topics())
     # for i in range(150): print(hdp.print_topics(i, 10))
@@ -477,26 +519,20 @@ def lda_check():
 
 
 def demo():
-    transactions = [
-        [1, 2, 5],
-        [2, 4],
-        [2, 3],
-        [1, 2, 4],
-        [1, 3],
-        [2, 3],
-        [1, 3],
-        [1, 2, 3, 5],
-        [1, 2, 3]
-    ]
-    itemsets = frequent_itemsets(transactions, 2)
-    print(list(itemsets))
+    str = "かきくあああけこ"
 
+    if re.search(r'あああ', str):
+        print("有り")
 
 def main():
-    # trans_texts()
+    DIRECTORY = "Data/Topicmodel/1217_2/"
+
+    for n in range(1, 5):
+     trans_texts(DIRECTORY, n, False)      # 同義語変換 True ->分かち書きしてから変換 False ->分かち書きせず変換
     # lda()
     # hdp()
-    lda_topicnum_alpha()
+    # exam_lda_topic_alpha()
+    # demo()
 
 
 

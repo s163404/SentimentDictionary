@@ -10,10 +10,17 @@ import emoji
 import MeCab
 import mojimoji
 import neologdn
+import numpy as np
+import pandas as pd
+import pandas
 import pytz
 import re
 import sys
 import time
+import topicmodel
+from scipy.cluster.hierarchy import linkage, dendrogram, fcluster, cophenet
+import matplotlib.pyplot as plt
+
 
 from pymongo import MongoClient
 
@@ -22,7 +29,8 @@ from pymongo import MongoClient
 入力：str
 出力：str
 """
-def pre_process(text:str):
+
+def pre_process(text:str, DOUGIGO_PATH:str, isdougigo:bool):
     # リプ宛先除去
     text = re.sub(r'@.{1,15} ', '', text)
     text = re.sub(r'@.{1,15}さんから', '', text)
@@ -46,21 +54,22 @@ def pre_process(text:str):
     if "モイ!iphoneからキャス配信中" in text:
         text = ""
 
+
     """
     同義語変換
-    preprocess 内にいれるか、
-    transtext単語単位の処理内にいれるか
+    textを分かち書きせず、単語を変換する
     """
-    dougigo = {}
-    with open("Data/dougigo_test.csv", 'r', encoding="utf-8") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if not row: continue
-            dougigo.setdefault(row[0], row[1])
+    if isdougigo == True:
+        dougigo = {}
+        with open(DOUGIGO_PATH, 'r', encoding="utf-8") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if not row: continue
+                if len(row) != 2: continue
+                dougigo.setdefault(row[0], row[1])
 
-    for k, v in dougigo.items():
-        text = text.replace(k, v)
-
+        for k, v in dougigo.items():
+            text = text.replace(k, v)
 
     return text
 
@@ -73,7 +82,8 @@ MeCab形態素解析
 def mecab(text:str, format:str):
     if not str: format = "-Owakati"
     m = MeCab.Tagger(format)
-    return m.parse(text)
+    parsed = m.parse(text)
+    return parsed
 
 """
 形態素解析結果をリスト出力する
@@ -163,31 +173,21 @@ def comb_collections():
     collection.insert_many(combined_list)
 
 
-"""
-テキストを成形する
--記号とアルファベットを半角化
--URL除去
--(リプの場合)宛先表現を除去
-"""
-def tweet_former(text:str):
-    text = mojimoji.zen_to_han(text, kana=False)
-    text = re.sub(r'https?://[\w/:%#\$&\?\(\)~\.=\+\-]+', '', text)
-    text = re.sub(r'^(@.{1,15} (?=)){1,2}', '', text)
-    return text
 
 """
 DBのデータ移し替え
 """
 def move_documents():
     client = MongoClient('localhost', 27017)
-    out_db = client.tweet_db
-    out_col = out_db.EVs_over05
-
+    # エクスポート側
+    ex_db = client.dbaname
+    ex_col = ex_db.colname
+    # インポート側
     in_db = client.tweet_db
     in_col = in_db.test_collection
 
-    docs = out_col.find(projection={'_id':0}).limit(3000)
-    in_col.remove()
+    docs = ex_col.find(projection={'_id':0})
+
     in_col.insert_many(docs)
 
 
@@ -198,16 +198,71 @@ def importcsvtoDB():
     client = MongoClient('localhost', 27017)
     # インポート先
     db = client.tweet_db
-    col = db.AirpodsPro
+    col = db.FireHD10
 
-    with open("Data/airpodspro.csv", 'r', encoding="utf-8") as f:
+    id_dict = {}
+    count = 0
+
+    write_list = []
+
+
+
+    with open("Data/firehd10_origin.csv", 'r', encoding="utf-8") as f:
         reader = csv.reader(f)
         for row in reader:
+            # ヘッダ行
+            if row[0] == "text" and row[1] == "id" and row[2] == "created_at":
+                continue
+            # 要素の数が３でない
+            if len(row) != 3:
+                print("1行の要素が3つでない")
+                break
+            # 重複チェック
+            if row[1] in id_dict.keys(): continue
+
+            id_dict.setdefault(row[1], 1)
+            count += 1
+
             post = {"text": row[0],
                     "id": row[1],
-                    "created_at": row[2]
-            }
+                    "created_at": change_time(row[2])
+                    }
             col.insert_one(post)
+            write_list.append([row[0], row[1], row[2]])
+
+
+    with open("Data/firehd10.csv", 'w', encoding="utf-8") as f:
+        writer = csv.writer(f)
+        for row in write_list:
+            writer.writerow(row)
+
+
+"""
+リストをサブリストに分割する
+:param l: リスト
+:param n: サブリストの要素数
+:return: 
+"""
+def split_list(l, n):
+    for idx in range(0, len(l), n):
+        yield l[idx:idx + n]
+
+
+"""
+MongoDBのコレクションをcsv出力
+"""
+def DBtotcsv():
+    client = MongoClient('localhost', 27017)
+    db = client.dbname
+    col = db.colname
+    docs = col.find(projection={'_id':0})
+    count = 0
+    with open("Data/csvfilename.csv", "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        for doc in docs:
+            text = doc["text"]
+            text = text.replace("\"", "")
+            writer.writerow([text, doc["id"], doc["created_at"]])
 
 
 """
@@ -236,18 +291,51 @@ def update_collection():
             col.save(doc)
 
 
+"""
+階層的クラスタリングのコーフェン相関係数を検証
+"""
+def clustering_cophenet(dataflame):
+    # アルゴリズム
+    METHOD = ["single", "complete", "average", "weighted",
+               "centroid", "median", "ward"]
+
+    #距離指標
+    metric = 'euclidean'  # ユークリッド距離
+
+    for method in METHOD:
+        linkage_result = linkage(dataflame, method=method, metric=metric)
+        c, d = cophenet(linkage_result, dataflame)
+
+        print("{0} {1}".format(method, c))
+
+        # plt.figure(num=None, figsize=(17, 17), dpi=200, facecolor='w', edgecolor='k')
+        # dendrogram(linkage_result, labels=dataflame.index)
+        # plt.xlabel("Product Name_Topic Number")
+        # plt.ylabel(metric + " distance")
+        # plt.title(method)
+        # plt.show()
+
+
+
 def tes():
-    list = ["A", "B", "C"]
-    str = "B個"
-    for l in list:
-        print(l in str)
 
-    sentence = "iosとipadとengadget"
-    print(mecab(sentence, "-Ochasen"))
+    nodes = mecab_tolist("バッテリに新型と新モデルは、\n予約確認済みで、受け取り予定。受取と受取り")
+    for node in nodes:
+        print(node)
+
+    print(mecab("バッテリに新型と新モデルは、apple watch series 5", "-Owakati"))
+
+    # text = "アップルウォッチシリーズ 5"
+    # print(text.replace("アップルウォッチシリーズ 5", "apple watch series 5"))
 
 
-if  __name__ == '__main__':
-    # importcsvtoDB()
+if __name__ == '__main__':
+    importcsvtoDB()
     # comb_collections()
+    # update_collection()
+    # tes()
+
+
+
 
     sys.exit

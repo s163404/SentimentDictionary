@@ -32,6 +32,7 @@ os.environ['MALLET_HOME'] = "C:\\Users\\KMLAB-02\\mallet-2.0.8"
 - 条件に合う名詞を取り出す
 """
 def trans_texts(DIRECTORY_PATH:str, pnum:int, ctrlHenkan:bool):
+    print("フォルダ:{0}".format(DIRECTORY_PATH))
     STOPWORD_PATH = DIRECTORY_PATH+"stopwords_1217.txt"
     DOUGIGO_PATH = DIRECTORY_PATH+"dougigo_1217.csv"
     # ストップワード読み込み
@@ -55,18 +56,25 @@ def trans_texts(DIRECTORY_PATH:str, pnum:int, ctrlHenkan:bool):
     if pnum == 1:
         col = db.unique_tweets                                  # 入力元
         csv_path = DIRECTORY_PATH+"texts_iphone11.csv"    # 出力先
+        text_path = DIRECTORY_PATH + "iphone11noURL.csv"
     elif pnum == 2:
         col = db.AirpodsPro
         csv_path = DIRECTORY_PATH+"texts_AirpodsPro.csv"
+        text_path = DIRECTORY_PATH + "AirpodsPronoURL.csv"
     elif pnum == 3:
         col = db.AppleWatch5
+        if "0106" in DIRECTORY_PATH: col = db.AppleWatch5_0106
         csv_path = DIRECTORY_PATH+"texts_Applewatch5.csv"
+        text_path = DIRECTORY_PATH + "Applewatch5noURL.csv"
     elif pnum == 4:
         col = db.GoproHero8
+        if "0106" in DIRECTORY_PATH: col = db.GoproHero8_0106
         csv_path = DIRECTORY_PATH+"texts_Goprohero8.csv"
+        text_path = DIRECTORY_PATH + "Goprohero8noURL.csv"
     elif pnum == 5:
         col = db.FireHD10
         csv_path = DIRECTORY_PATH+"texts_Firehd10.csv"
+        text_path = DIRECTORY_PATH + "Firehd10noURL.csv"
 
     # unique_tweets-iphone11
     # AirpodsPro-AirpodsPro
@@ -78,13 +86,14 @@ def trans_texts(DIRECTORY_PATH:str, pnum:int, ctrlHenkan:bool):
     for doc in col.find(projection={'_id': 0}):
         if doc["text"] is not None: raw_texts.append(doc["text"])
 
-
+    textsnourl = []
     print("テキストを単語群で表現")
     words_of_texts = []
     for text in raw_texts:
         words = []
         # URL付きツイートはスキップ
         if re.search(r'https?://[\w/:%#\$&\?\(\)~\.=\+\-]+', text): continue
+        if "モイ!iphoneからキャス配信中" in text: continue
         # テキスト前処理
         if ctrlHenkan == True:
             """
@@ -96,7 +105,9 @@ def trans_texts(DIRECTORY_PATH:str, pnum:int, ctrlHenkan:bool):
             wakati_text = tools.mecab(text, "-Owakati").split(" ")
             for keitaiso in wakati_text:
                 for origin, henkan in dougigo.items():
-                    if keitaiso == origin: keitaiso = henkan    # 変換できる語は置換
+                    # if keitaiso == origin: keitaiso = henkan    # 変換できる語は置換
+                    keitaiso = re.sub(origin, henkan, keitaiso)
+
             text = ''.join(wakati_text)
 
         else:
@@ -109,6 +120,7 @@ def trans_texts(DIRECTORY_PATH:str, pnum:int, ctrlHenkan:bool):
 
         if not text: continue
 
+        textsnourl.append(text.replace("\n", ""))
 
         # 形態素単位前処理
         nodes = tools.mecab_tolist(text)
@@ -139,12 +151,16 @@ def trans_texts(DIRECTORY_PATH:str, pnum:int, ctrlHenkan:bool):
 
         if words: words_of_texts.append(words)
 
-    # CSV化
+    # CSV
     print(csv_path + "に出力")
     with open(csv_path, 'w', encoding="utf-8") as f:
         writer = csv.writer(f, lineterminator='\n')
         writer.writerows(words_of_texts)
         f.close()
+
+    with open(text_path, 'w', encoding="utf-8") as f:
+        f.write('\n'.join(textsnourl))
+
 
 
 """
@@ -385,11 +401,8 @@ def exam_lda_topic_alpha():
 
 
 
-
-
-
 def hdp():
-    INPUT_PATH = "Data/Topicmodel/texts2_AirpodsPro.csv"
+    INPUT_PATH = "Data/Topicmodel/1217/texts_AirpodsPro.csv"
 
     T = 10  # トピック数
     W = 10  # トピックから取り出す単語の数
@@ -472,7 +485,7 @@ def topic_prob_extractor(gensim_hdp, t=-1, w=25, isSorted=True):
 
 
 """
-コヒーレンスとパープレキシィ
+コヒーレンスとパープレキシティ
 """
 def lda_check():
     NO_BELOW = 1
@@ -516,24 +529,11 @@ def lda_check():
 
         print(f"num_topics = {i}, coherence = {coherence}, perplexity = {perplexity}")
 
-
-
-def demo():
-    str = "かきくあああけこ"
-
-    if re.search(r'あああ', str):
-        print("有り")
-
 def main():
-    DIRECTORY = "Data/Topicmodel/1217_2/"
+    DIRECTORY = "Data/Topicmodel/1217/"
 
-    for n in range(1, 5):
-     trans_texts(DIRECTORY, n, False)      # 同義語変換 True ->分かち書きしてから変換 False ->分かち書きせず変換
-    # lda()
-    # hdp()
-    # exam_lda_topic_alpha()
-    # demo()
-
+    # for n in range(1, 6):
+    #  trans_texts(DIRECTORY, n, False)      # 同義語変換 True ->分かち書きしてから変換 False ->分かち書きせず変換
 
 
 if __name__ == '__main__':

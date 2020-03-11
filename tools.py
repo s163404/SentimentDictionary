@@ -7,10 +7,12 @@
 import csv
 import datetime
 import emoji
+from gensim import corpora
 import MeCab
 import mojimoji
 import neologdn
 import numpy as np
+from orangecontrib.associate import *
 import pandas as pd
 import pandas
 import pytz
@@ -38,8 +40,8 @@ def pre_process(text:str, DOUGIGO_PATH:str, isdougigo:bool):
     # 正規化
     # -アルファベット：全→半
     # -カタカナ：半→全
-    # -伸ばし棒統一
-    # ただし、全角記号は例外
+    # -長音符統一
+    # -記号：全⭢半角
     text = neologdn.normalize(text)
     # アルファベット：小文字化
     text = text.lower()
@@ -51,8 +53,8 @@ def pre_process(text:str, DOUGIGO_PATH:str, isdougigo:bool):
     text = ''.join(c for c in text if c not in emoji.UNICODE_EMOJI)
     text = re.sub(r'[\U0001F300-\U0001F5FF]+', '', text)
     # 表現フィルター
-    if "モイ!iphoneからキャス配信中" in text:
-        text = ""
+    # if "モイ!iphoneからキャス配信中" in text:
+    #     text = ""
 
 
     """
@@ -68,8 +70,9 @@ def pre_process(text:str, DOUGIGO_PATH:str, isdougigo:bool):
                 if len(row) != 2: continue
                 dougigo.setdefault(row[0], row[1])
 
-        for k, v in dougigo.items():
-            text = text.replace(k, v)
+        for before, after in dougigo.items():
+            atext = text.replace(before, after)
+            text = re.sub(before, after, text)
 
     return text
 
@@ -154,23 +157,30 @@ def import_dict():
 """
 def comb_collections():
     combined_list = []
+    combined_dict = {}
     client = MongoClient('localhost', 27017)
-    db = client.tweet_db
+    db = client.word_dict
 
-    collection = db.RingFA      # 統合したいコレクション１
-    for doc in collection.find(projection={'_id':0, 'text':1, 'id':1, 'created_at':1}):
-        combined_list.append(doc)
+    collection = db.pn_takamura # 統合したいコレクション１
+    for doc in collection.find(projection={'_id':0}):
+        if len(doc) != 2:
+            i = 22
+            continue
 
-    collection = db.AirpodsPro  # 統合したいコレクション２
-    for doc in collection.find(projection={'_id':0, 'text':1, 'id':1, 'created_at':1}):
-        combined_list.append(doc)
+        combined_dict.setdefault(doc["word"], doc["param"])
 
-    collection = db.GoProHero8  # 統合したいコレクション３
-    for doc in collection.find(projection={'_id':0, 'text':1, 'id':1, 'created_at':1}):
-        combined_list.append(doc)
+    collection = db.pn_wago  # 統合したいコレクション２
+    for doc in collection.find(projection={'_id':0}):
+        if len(doc) != 2:
+            i = 22
+            continue
+        combined_dict.setdefault(doc["word"], doc["param"])
 
-    collection = db.combined1113
-    collection.insert_many(combined_list)
+
+    # 保存先
+    collection = db.pn_combi
+    for word, param in combined_dict.items():
+        collection.insert_one({"word": word, "param": param})
 
 
 
@@ -180,11 +190,11 @@ DBのデータ移し替え
 def move_documents():
     client = MongoClient('localhost', 27017)
     # エクスポート側
-    ex_db = client.dbaname
-    ex_col = ex_db.colname
+    ex_db = client.tweet_db
+    ex_col = ex_db.GoproHero8
     # インポート側
     in_db = client.tweet_db
-    in_col = in_db.test_collection
+    in_col = in_db.dd
 
     docs = ex_col.find(projection={'_id':0})
 
@@ -198,16 +208,11 @@ def importcsvtoDB():
     client = MongoClient('localhost', 27017)
     # インポート先
     db = client.tweet_db
-    col = db.FireHD10
+    col = db.AppleWatch5_0106
 
     id_dict = {}
     count = 0
-
-    write_list = []
-
-
-
-    with open("Data/firehd10_origin.csv", 'r', encoding="utf-8") as f:
+    with open("Data/awatch5_0106.csv", 'r', encoding="utf-8") as f:
         reader = csv.reader(f)
         for row in reader:
             # ヘッダ行
@@ -225,16 +230,9 @@ def importcsvtoDB():
 
             post = {"text": row[0],
                     "id": row[1],
-                    "created_at": change_time(row[2])
-                    }
+                    "created_at": row[2]}
             col.insert_one(post)
-            write_list.append([row[0], row[1], row[2]])
 
-
-    with open("Data/firehd10.csv", 'w', encoding="utf-8") as f:
-        writer = csv.writer(f)
-        for row in write_list:
-            writer.writerow(row)
 
 
 """
@@ -315,27 +313,72 @@ def clustering_cophenet(dataflame):
         # plt.title(method)
         # plt.show()
 
+def corpusdemo():
+    texts = [
+        "難しい前半だったが、シュートの見せ場を作った。シュートしたが交代した",
+        "前半のチャンスを逃した。攻撃を牽引したが、シュートし交代した。",
+        "あれは欲しくない"
+    ]
+
+    nodes = mecab_tolist(texts[2])
+
+    words = []
+    for text in texts:
+        tmp = []
+        for node in mecab_tolist(text):
+            if len(node[0]) == 1 and re.search(r'[あ-ん]', node[0]): continue
+            if node[1] == "名詞" or node[1] == "形容詞" or node[1] == "動詞":
+                tmp.append(node[0])
+        words.append(tmp)
 
 
-def tes():
+    # gensim辞書
+    dictionary = corpora.Dictionary(words)
+    dictionary[0]
 
-    nodes = mecab_tolist("バッテリに新型と新モデルは、\n予約確認済みで、受け取り予定。受取と受取り")
-    for node in nodes:
-        print(node)
+    # コーパス生成
+    corpus = [dictionary.doc2bow(terms) for terms in words]
+    print(corpus)
+    1
 
-    print(mecab("バッテリに新型と新モデルは、apple watch series 5", "-Owakati"))
+def text_sort(path = "Data/Topicmodel/1217/"):
+    positive_list = []
+    positive_counts = []
+    negative_list = []
+    negative_counts = []
 
-    # text = "アップルウォッチシリーズ 5"
-    # print(text.replace("アップルウォッチシリーズ 5", "apple watch series 5"))
+    with open(path+"text.txt", "r", encoding="utf-8") as f:
+        for row in f.readlines():
+            if row is None: continue
+
+            row = row.replace("[", "")
+            if "(P)" in row:
+                tmp = row.split(",")
+                positive_list.append(tmp[0])
+                positive_counts.append(tmp[1])
+            else:
+                tmp = row.split(",")
+                negative_list.append(tmp[0])
+                negative_counts.append(tmp[1])
+
+    print("P")
+    for item in positive_list: print(item.replace("\n", "").replace("(P)", ""))
+    for item in positive_counts: print(item.replace("\n", ""))
+
+
+    print("N")
+    for item in negative_list: print(item.replace("\n", "").replace("(N)", ""))
+    for item in negative_counts: print(item.replace("\n", "").replace(" ", ""))
+
+
+
+
 
 
 if __name__ == '__main__':
     importcsvtoDB()
-    # comb_collections()
-    # update_collection()
-    # tes()
-
-
+    corpusdemo()
+    comb_collections()
 
 
     sys.exit

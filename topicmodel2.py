@@ -6,11 +6,12 @@ import itertools
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import re
 import sys
 import tools
 from gensim import corpora, models
 from gensim.models import HdpModel
-from orangecontrib.associate.fpgrowth import *
+from orangecontrib.associate import *
 import pandas as pd
 from pandas import plotting
 from pprint import pprint
@@ -18,6 +19,8 @@ from pymongo import MongoClient
 from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
 from sklearn.cluster import KMeans
 from tools import mecab
+from sklearn.metrics import silhouette_samples, silhouette_score
+from matplotlib import cm
 
 os.environ['MALLET_HOME'] = "C:\\Users\\KMLAB-02\\mallet-2.0.8"
 
@@ -30,25 +33,26 @@ os.environ['MALLET_HOME'] = "C:\\Users\\KMLAB-02\\mallet-2.0.8"
 """
 def extract_aspects2(DIRECTORY:str):
     W = 10      # トピックから取り出す単語の数
-    C = 3       # クラスタ数
+    C = 6      # クラスタ数
     T_iphone = 10
     T_airpods = 10
     T_awatch = 10
     T_gopro = 10
     T_firehd = 10
     NB_param = 0
+    NB_rate = 0.0
     DATA = [
         # ファイルパス, 商品名, トピック数, NO_BELOW, NO_ABOVE
-        # (DIRECTORY+"texts_iphone11.csv", "iPhone 11", T_iphone, 1+NB_param, 1.0),
-        (DIRECTORY+"texts_AirpodsPro.csv", "AirpodsPro", T_airpods, 1+NB_param, 1.0),
-        (DIRECTORY+"texts_AppleWatch5.csv", "AppleWatch 5", T_awatch, 1+NB_param, 1.0),
-        (DIRECTORY+"texts_GoproHero8.csv", "GoPro Hero8", T_gopro, 1+NB_param, 1.0),
-        (DIRECTORY+"texts_FireHD10.csv", "Fire HD 10", T_firehd, 1 + NB_param, 1.0)
+        (DIRECTORY+"texts_iphone11.csv", "iPhone 11", T_iphone, NB_rate, 1.0),
+        (DIRECTORY+"texts_AirpodsPro.csv", "AirpodsPro", T_airpods, NB_rate, 1.0),
+        (DIRECTORY+"texts_AppleWatch5.csv", "AppleWatch 5", T_awatch, NB_rate, 1.0),
+        (DIRECTORY+"texts_GoproHero8.csv", "GoPro Hero8", T_gopro, NB_rate, 1.0),
+        (DIRECTORY+"texts_FireHD10.csv", "Fire HD 10", T_firehd, NB_rate, 1.0) #1+NB_param
     ]
     #FPM出力
-    FPM_PATH = DIRECTORY+"FPM_kmeans.txt"
+    FPM_PATH = DIRECTORY+"FPM_kmeanssss.txt"
 
-    print("処理済のテキスト集合を呼び出し")
+    # print("処理済のテキスト集合を呼び出し")
     texts = []
     texts_num = []
     for item in DATA:
@@ -68,16 +72,14 @@ def extract_aspects2(DIRECTORY:str):
     for text, data, num in zip(texts,DATA, texts_num):
         PNAME = data[1]
         T = data[2]
-        NO_BELOW = data[3]
-        NO_ABOVE = data[4]
-        rate = num / sum(texts_num)
+        rate = num / sum(texts_num)     # 商品１つのテキスト数/全商品のテキスト数
 
         print("{0}のテキストコーパス作成～LDA学習".format(PNAME))
         # gensim辞書
         dictionary = corpora.Dictionary(text)
         # フィルタリング
-        dictionary.filter_extremes(no_below=NO_BELOW,
-                                   no_above=NO_ABOVE)
+        dictionary.filter_extremes(no_below=1+data[3]*len(text),
+                                   no_above=data[4])
         # フィルタリング済のdictionaryから単語辞書(dict型)生成　
         dictionary[0]
         id_word_dict = dictionary.id2token
@@ -90,6 +92,7 @@ def extract_aspects2(DIRECTORY:str):
                                                     id2word=dictionary,
                                                     random_state=1)
         pprint(lda_bayes.show_topics())
+        # print(lda_bayes)
         # for t in range(T): print(lda_bayes.print_topic(t, W))
 
         """ 
@@ -108,6 +111,8 @@ def extract_aspects2(DIRECTORY:str):
                 prob = id_prob[1]                   # 出現確率
 
                 distribution.append((word, prob*rate))    # 出現確率*商品のテキスト数比率
+                # distribution.append((word, prob))  # 出現確率*商品のテキスト数比率
+
 
             alldomain_topicid_topic_dict.setdefault(topic_id, distribution)
             topic_id += 1
@@ -181,17 +186,26 @@ def extract_aspects2(DIRECTORY:str):
     # print(topic_array)
 
     print("\n=============トピッククラスタリング============")
-    # クラスタ数の検討用
+    # クラスタ数の検討
     c_range = 0
-    for data in DATA: c_range += data[2]
+    for data in DATA: c_range += data[2]    # トピック数の合計⭢最大クラスタ数
+
     distortions = []
-    for i in range(1, c_range):  # 1~10クラスタまで一気に計算
+    for i in range(2, c_range-1):  # 1~10クラスタまで一気に計算
         km = KMeans(n_clusters=i, random_state=1)
         km.fit(topic_array)  # クラスタリングの計算を実行
+        # SSE
         distortions.append(km.inertia_)  # km.fitするとkm.inertia_が得られる inertia=重心との二乗誤差
-    plt.plot(range(1, c_range), distortions, marker='o')
+
+        # シルエット値（-1～1）の平均
+        cluster_labels = km.fit_predict(topic_array)
+        silhouette_avg = silhouette_score(topic_array, cluster_labels)
+        print('For n_clusters =', i,
+              'The average silhouette_score is :', silhouette_avg)
+
+    plt.plot(range(2, c_range-1), distortions, marker='o')
     plt.xlim([0, c_range])
-    plt.xticks(list(range(0, c_range, 2)))
+    plt.xticks(list(range(2, c_range-1, 2)))
     plt.xlabel('Number of clusters')
 
     # plt.ylim([0.00, 0.02])
@@ -276,7 +290,7 @@ def extract_aspects2(DIRECTORY:str):
                 print(alldomain_topicid_topic_dict[topic_id])
                 result_FPM += str(alldomain_topicid_topic_dict[topic_id]) + "\n"
             continue
-        itemsets = frequent_itemsets(transactions, len(transactions))    # 頻出ワード集合
+        itemsets = fpgrowth.frequent_itemsets(transactions, len(transactions))    # 頻出ワード集合
         if itemsets is None:
             for topic_id in topic_ids:
                 print(alldomain_topicid_topic_dict[topic_id])
@@ -318,13 +332,13 @@ def extract_aspects_hierarichal(DIRECTORY:str):
     # 階層クラスタリングのアルゴリズム設定
     method = 'ward'
     metric = 'euclidean'  # ユークリッド距離
-    color_threshold = 0.7       # ユークリッド距離の閾値?
-    fcluster_params = [3, 'maxclust']   # クラスタリング実行のパラメータ
+    color_threshold = 0.8       # ユークリッド距離の閾値?
+    fcluster_params = [5, 'maxclust']   # クラスタリング実行のパラメータ
     # distance-> tはユークリッド距離の閾値, maxclust-> tはクラスタ数　
 
     DATA = [
         # ファイルパス, 商品名, トピック数, NO_BELOW, NO_ABOVE
-        # (DIRECTORY+"texts_iphone11.csv", "iPhone 11", T_iphone, 1+NB_param, 1.0),
+        (DIRECTORY+"texts_iphone11.csv", "iPhone 11", T_iphone, 1+NB_param, 1.0),
         (DIRECTORY+"texts_AirpodsPro.csv", "AirpodsPro", T_airpods, 1+NB_param, 1.0),
         (DIRECTORY+"texts_AppleWatch5.csv", "AppleWatch 5", T_awatch, 1+NB_param, 1.0),
         (DIRECTORY+"texts_GoproHero8.csv", "GoPro Hero8", T_gopro, 1+NB_param, 1.0),
@@ -518,12 +532,15 @@ def extract_aspects_hierarichal(DIRECTORY:str):
             product = topic_product_dict[topic_id]
             if pname != product[0]:
                 pname = product[0]
-                print(pname + ", ", end="")
+                print(pname + ", ", end="")     #商品名print
                 result_FPM += pname + ", "
 
         print("\n")
         result_FPM += "\n\n"
 
+        """
+        １商品のみのクラスタ
+        """
         if len(transactions) == 1:
             print("商品１つのみ")
             result_FPM += "商品１つのみ\n"
@@ -531,7 +548,10 @@ def extract_aspects_hierarichal(DIRECTORY:str):
                 print(alldomain_topicid_topic_dict[topic_id])
                 result_FPM += str(alldomain_topicid_topic_dict[topic_id]) + "\n"
             continue
-        itemsets = frequent_itemsets(transactions, len(transactions))  # 頻出ワード集合
+        """
+        複数商品のクラスタ
+        """
+        itemsets = fpgrowth.frequent_itemsets(transactions, len(transactions))  # 頻出ワード集合
         if itemsets is None:
             for topic_id in topic_ids:
                 print(alldomain_topicid_topic_dict[topic_id])
@@ -722,7 +742,7 @@ def extract_aspects_comparison(DIRECTORY:str):
                 product_w_ids = list(set(product_w_ids))
                 transactions.append(product_w_ids)
 
-            itemsets = frequent_itemsets(transactions, len(transactions))  # 頻出ワード集合
+            itemsets = fpgrowth.frequent_itemsets(transactions, len(transactions))  # 頻出ワード集合
             for tuple in itemsets:
                 if len(tuple[0]) != 1: continue  # 単語が複数のセットをスキップ
                 print("  ( ", end="")
@@ -737,6 +757,7 @@ def extract_aspects_comparison(DIRECTORY:str):
 
     with open(FPM_PATH, 'w', encoding="utf-8") as f:
         f.write(result_FPM)
+
 
     print("終了")
 
@@ -778,17 +799,25 @@ def ext_aspw_pair(pnum:int, zokusei:str):
     db = client.word_dict
 
     # 乾辞書   活用形網羅するために、スペースを含む単語がある
-    col = db.pn_wago
-    docs = col.find(projection={'_id': 0})
-    for doc in docs:
-        word = doc["word"].replace(" ", "+") # スペースを含む単語は、スペースを+に置換して登録
-        polword_dict.setdefault(word, doc["param"])
-    if '' in polword_dict.keys(): polword_dict.pop('')
-
-    # 高村辞書
+    # col = db.pn_wago
+    # docs = col.find(projection={'_id': 0})
+    # for doc in docs:
+    #     word = doc["word"].replace(" ", "+") # スペースを含む単語は、スペースを+に置換して登録
+    #     polword_dict.setdefault(word, doc["param"])
+    # if '' in polword_dict.keys(): polword_dict.pop('')
+    # # 高村辞書　用言＋助動詞（"ない""ぬ"）
     # col = db.pn_takamura
     # docs = col.find(projection={'_id': 0})
     # for doc in docs: polword_dict.setdefault(doc["word"], doc["param"])
+
+    # 統合辞書(重複無し)
+    col = db.pn_combi
+    docs = col.find(projection={'_id': 0})
+    for doc in docs:
+        word = doc["word"].replace(" ", "+")  # スペースを含む単語は、スペースを+に置換して登録
+        polword_dict.setdefault(word, doc["param"])
+    if '' in polword_dict.keys(): polword_dict.pop('')
+
     del docs
 
 
@@ -802,57 +831,63 @@ def ext_aspw_pair(pnum:int, zokusei:str):
     result = {}
     Posi_count = 0
     Nega_count = 0
-    for text in texts:
-        if zokusei not in text: continue
-        # テキスト分かち書き
-        wakati_text = mecab(text, "-Owakati")
-        for word in polword_dict.keys():          # スペース含む評価語への対応
-            word = word.replace("+", " ")
-            if word in wakati_text:
-                wakati_text = wakati_text.replace(word, word.replace(" ", "+"))
+    for ttext in texts:
+        if zokusei not in ttext: continue
 
-        # 分かち書きテキストを辞書化
-        wakati_dict = {}
-        position = 1
-        for keitaiso in wakati_text.split(" "):
-            wakati_dict.setdefault(keitaiso, position)
-            position += 1
-        del position
+        sentences = re.sub(r'!|！|\?|？|\n', '。', ttext).split("。")     #1文ずつ区切る
 
-        # 属性語の位置を特定
-        aspect = ()  # 語, 位置
-        for word, position in wakati_dict.items():
-            if zokusei == word:
-                aspect = (zokusei, position)
-        if not aspect: continue
+        for text in sentences:
+            if zokusei not in text: continue
 
-        # 評価語を探索
-        pol_posi_dist = []    # 評価語、位置、 属性語との距離
-        for word, position in wakati_dict.items():
-            for p_word in polword_dict.keys():
-                # word2 = mecab(word, "-Owakati").replace("\n", "")         # 乾辞書のスペース有り単語への対応
-                if p_word != word: continue
-                pol_posi_dist.append([p_word, position, None])
-                break
-        if not pol_posi_dist: continue
-        for item in pol_posi_dist:
-                item[2] = abs(aspect[1] - item[1])
+            # テキスト分かち書き
+            wakati_text = mecab(text, "-Owakati")
+            for word in polword_dict.keys():          # スペース含む評価語への対応
+                word = word.replace("+", " ")
+                if word in wakati_text:
+                    wakati_text = wakati_text.replace(word, word.replace(" ", "+"))
 
-        # 属性語に最短距離の評価語を割り当てる
-        pol_posi_dist = sorted(pol_posi_dist, key=lambda x: x[2])  # 距離の昇順ソート
-        closest = pol_posi_dist[0]
-        pol_word = closest[0]
-        if polword_dict[pol_word] > 0:
-            pair = "{0} - {1} ({2})".format(zokusei, pol_word, "P")     # ポジティブ評価を割り当てる
-            Posi_count += 1
-        else:
-            pair = "{0} - {1} ({2})".format(zokusei, pol_word, "N")     # ネガティブ評価を割り当てる
-            Nega_count += 1
+            # 分かち書きテキストを辞書化
+            wakati_dict = {}
+            position = 1
+            for keitaiso in wakati_text.split(" "):
+                wakati_dict.setdefault(keitaiso, position)
+                position += 1
+            del position
 
-        if pair not in result.keys():
-            result.setdefault(pair, 1)    # 属性語-評価語のペアと、ペアの出現回数
-        else:
-            result[pair] += 1
+            # 属性語の位置を特定
+            aspect = ()  # 語, 位置
+            for word, position in wakati_dict.items():
+                if zokusei == word:
+                    aspect = (zokusei, position)
+            if not aspect: continue
+
+            # 評価語を探索
+            pol_posi_dist = []    # 評価語、位置、 属性語との距離
+            for word, position in wakati_dict.items():
+                for p_word in polword_dict.keys():
+                    # word2 = mecab(word, "-Owakati").replace("\n", "")         # 乾辞書のスペース有り単語への対応
+                    if p_word != word: continue
+                    pol_posi_dist.append([p_word, position, None])
+                    break
+            if not pol_posi_dist: continue
+            for item in pol_posi_dist:
+                    item[2] = abs(aspect[1] - item[1])
+
+            # 属性語に最短距離の評価語を割り当てる
+            pol_posi_dist = sorted(pol_posi_dist, key=lambda x: x[2])  # 距離の昇順ソート
+            closest = pol_posi_dist[0]
+            pol_word = closest[0]
+            if polword_dict[pol_word] > 0:
+                pair = "{0} - {1} {2}".format(zokusei, pol_word, "P")     # ポジティブ評価を割り当てる
+                Posi_count += 1
+            else:
+                pair = "{0} - {1} {2}".format(zokusei, pol_word, "N")     # ネガティブ評価を割り当てる
+                Nega_count += 1
+
+            if pair not in result.keys():
+                result.setdefault(pair, 1)    # 属性語-評価語のペアと、ペアの出現回数
+            else:
+                result[pair] += 1
 
     result = sorted(result.items(), key=lambda x:x[1], reverse=True)
     pprint(result)
@@ -868,7 +903,7 @@ def main():
     extract_aspects2(DIRECTORY_PATH)
     # extract_aspects_hierarichal(DIRECTORY_PATH)
     # extract_aspects_comparison(DIRECTORY_PATH)
-    # ext_aspw_pair(3, "サイズ")   # 引数　(対象商品の番号, 評価したい属性)
+    # for i in range(3, 6): ext_aspw_pair(i, "値段")   # 引数　(対象商品の番号, 評価したい属性)
 
 
 if __name__ == '__main__':
